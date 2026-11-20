@@ -3661,6 +3661,164 @@ function handleLaunch(request) {
    later(LAUNCH_FIRST_CHECK_MS, check);
 }
 
+// ----------------------------------------------------------------- Actions
+//
+// Bitwig's action registry (about 780 actions in Bitwig 6.1.7). Ids are
+// stable and English; names, menu text and category names follow Bitwig's
+// display language. invoke() reports nothing back, so an action call returns
+// the project state the bridge saw change instead of a confirmation.
+
+// Actions that close or replace the project, quit Bitwig, or answer whatever
+// dialog is open (which could discard unsaved work). They are listed but not
+// invoked.
+var BLOCKED_ACTIONS = {
+   "New": "creates a new project",
+   "Open": "opens another project",
+   "Close": "closes the project",
+   "Quit": "quits Bitwig Studio",
+   "new_from_template": "creates a new project",
+   "Dialog: Yes": "answers whatever dialog is open",
+   "Dialog: No": "answers whatever dialog is open",
+   "Dialog: OK": "answers whatever dialog is open"
+};
+var PANEL_LAYOUTS = ["ARRANGE", "MIX", "EDIT"];
+var MAX_ACTIONS_PER_REPLY = 200;
+var ACTION_SETTLE_MS = 400;
+
+function actionSnapshot(action) {
+   var category = action.getCategory();
+   var entry = {
+      id: String(action.getId() || ""),
+      name: String(action.getName() || ""),
+      menuItemText: String(action.getMenuItemText() || ""),
+      category: category ? String(category.getId()) : ""
+   };
+   if (BLOCKED_ACTIONS[entry.id]) entry.blocked = BLOCKED_ACTIONS[entry.id];
+   return entry;
+}
+
+function handleFindActions(request) {
+   var params = request.params;
+   var query = normalizeText(params.query || "");
+   var categoryId = params.category === undefined ? "" : String(params.category);
+   if (categoryId && !application.getActionCategory(categoryId)) {
+      throw new Error("Bitwig has no action category ‘" + categoryId + "’. Pass includeCategories: true to list them.");
+   }
+   var actions = categoryId ? application.getActionCategory(categoryId).getActions() : application.getActions();
+   var matches = [];
+   for (var i = 0; i < actions.length; i++) {
+      var entry = actionSnapshot(actions[i]);
+      var text = normalizeText(entry.id + " " + entry.name + " " + entry.menuItemText + " " + entry.category);
+      if (!query || text.indexOf(query) !== -1) matches.push(entry);
+   }
+   var offset = Math.max(0, Math.floor(Number(params.offset || 0)));
+   var limit = Math.max(1, Math.min(MAX_ACTIONS_PER_REPLY, Math.floor(Number(params.limit || 50))));
+   var payload = {
+      totalActions: application.getActions().length,
+      matched: matches.length,
+      offset: offset,
+      returned: Math.max(0, Math.min(limit, matches.length - offset)),
+      actions: matches.slice(offset, offset + limit)
+   };
+   if (params.includeCategories) {
+      var categories = application.getActionCategories();
+      payload.categories = [];
+      for (var c = 0; c < categories.length; c++) {
+         payload.categories.push({ id: String(categories[c].getId()), name: String(categories[c].getName()), actions: categories[c].getActions().length });
+      }
+   }
+   finish(request, true, payload);
+}
+
+// What an action could visibly change, compared before and after it runs.
+function projectStateSnapshot() {
+   var transportState = transportSnapshot();
+   var tracks = listTracks();
+   return {
+      project: application.projectName().get(),
+      projectModified: project.isModified().get(),
+      canUndo: application.canUndo().get(),
+      canRedo: application.canRedo().get(),
+      panelLayout: application.panelLayout().get(),
+      tracks: tracks.tracks.map(function(t) { return t.name; }).join(" | "),
+      effectTracks: tracks.effectTracks.map(function(t) { return t.name; }).join(" | "),
+      sceneCount: sceneBank.itemCount().get(),
+      selectedTrack: cursorTrack.exists().get() ? cursorTrack.name().get() : null,
+      selectedDevice: cursorDevice.exists().get() ? cursorDevice.name().get() : null,
+      playing: transportState.playing,
+      arrangerRecord: transportState.arrangerRecord,
+      tempo: transportState.tempo,
+      timeSignature: transportState.timeSignature,
+      loop: transportState.loop.enabled,
+      metronome: transportState.metronome.enabled,
+      arrangerOverdub: transportState.arrangerOverdub,
+      automationWrite: transportState.automationWrite.arranger
+   };
+}
+
+function stateChanges(before, after) {
+   var changes = {};
+   for (var key in after) {
+      if (before[key] !== after[key]) changes[key] = { before: before[key], after: after[key] };
+   }
+   return changes;
+}
+
+function handleInvokeAction(request) {
+   var params = request.params;
+   var given = ["actionId", "command", "panelLayout"].filter(function(key) { return params[key] !== undefined; });
+   if (given.length !== 1) throw new Error("Pass exactly one of actionId, command or panelLayout.");
+   var before = projectStateSnapshot();
+
+   if (params.panelLayout !== undefined) {
+      var layout = String(params.panelLayout);
+      if (PANEL_LAYOUTS.indexOf(layout) === -1) throw new Error("panelLayout must be one of " + PANEL_LAYOUTS.join(", ") + ".");
+      application.setPanelLayout(layout);
+      verifyReadback(request, function() {
+         var shown = application.panelLayout().get();
+         return shown === layout ? "" : "panel layout is " + shown + ", requested " + layout;
+      }, function() {
+         finish(request, true, { panelLayout: layout, observedChanges: stateChanges(before, projectStateSnapshot()) });
+      });
+      return;
+   }
+
+   if (params.command !== undefined) {
+      var command = String(params.command);
+      if (command !== "undo" && command !== "redo") throw new Error("command must be undo or redo.");
+      var available = command === "undo" ? application.canUndo().get() : application.canRedo().get();
+      if (!available) throw new Error("Bitwig has nothing to " + command + ".");
+      if (command === "undo") application.undo();
+      else application.redo();
+      // An undo always leaves something to redo, and a redo something to undo.
+      verifyReadback(request, function() {
+         var opposite = command === "undo" ? application.canRedo().get() : application.canUndo().get();
+         return opposite ? "" : "there is nothing to " + (command === "undo" ? "redo" : "undo") + " afterwards, so Bitwig did not " + command;
+      }, function() {
+         later(ACTION_SETTLE_MS, function() {
+            finish(request, true, { command: command, observedChanges: stateChanges(before, projectStateSnapshot()) });
+         });
+      });
+      return;
+   }
+
+   var actionId = String(params.actionId);
+   if (BLOCKED_ACTIONS[actionId]) throw new Error("Bitwig Agent Bridge does not invoke ‘" + actionId + "’: it " + BLOCKED_ACTIONS[actionId] + ". Do this in Bitwig yourself.");
+   var action = application.getAction(actionId);
+   if (!action) throw new Error("Bitwig has no action with the id ‘" + actionId + "’. Ids are case-sensitive; find them with bitwig_actions.");
+   action.invoke();
+   later(ACTION_SETTLE_MS, function() {
+      var changes = stateChanges(before, projectStateSnapshot());
+      finish(request, true, {
+         action: actionSnapshot(action),
+         invoked: true,
+         observedChanges: changes,
+         note: "Bitwig does not report whether an action did anything. observedChanges lists what the bridge saw change in tracks, scenes, selection, transport, undo state and panel layout" +
+            (Object.keys(changes).length ? "." : "; nothing there changed, which is expected for view, selection or editor actions.")
+      });
+   });
+}
+
 function dispatch(request) {
    var params = request.params;
    switch (request.method) {
@@ -3686,40 +3844,13 @@ function dispatch(request) {
          handleCueMarkers(request);
          return;
       case "invoke_action":
-         var requestedActionId = String(params.actionId || "");
-         var requestedAction = application.getAction(requestedActionId);
-         if (!requestedAction) {
-            finish(request, false, { message: "Bitwig action ‘" + requestedActionId + "’ was not found." });
-            return;
-         }
-         requestedAction.invoke();
-         later(180, function() {
-            finish(request, true, { id: requestedActionId, invoked: true });
-         });
+         handleInvokeAction(request);
          return;
       case "list_tracks":
          finish(request, true, listTracks());
          return;
       case "find_actions":
-         var actionQuery = normalizeText(params.query || "");
-         var availableActions = application.getActions();
-         var matchingActions = [];
-         for (var actionIndex = 0; actionIndex < availableActions.length; actionIndex++) {
-            var availableAction = availableActions[actionIndex];
-            var actionId = String(availableAction.getId() || "");
-            var actionName = String(availableAction.getName() || "");
-            var actionMenuText = String(availableAction.getMenuItemText() || "");
-            var actionSearchText = normalizeText(actionId + " " + actionName + " " + actionMenuText);
-            if (!actionQuery || actionSearchText.indexOf(actionQuery) !== -1) {
-               matchingActions.push({ id: actionId, name: actionName, menuItemText: actionMenuText });
-            }
-         }
-         finish(request, true, {
-            query: String(params.query || ""),
-            totalActions: availableActions.length,
-            matched: matchingActions.length,
-            actions: matchingActions.slice(0, 100)
-         });
+         handleFindActions(request);
          return;
       case "track_meters":
          if (params.action === "reset") {
@@ -3967,6 +4098,9 @@ function init() {
    interested(transport.isArrangerAutomationWriteEnabled());
    interested(transport.defaultLaunchQuantization());
    interested(application.hasActiveEngine());
+   interested(application.canUndo());
+   interested(application.canRedo());
+   interested(application.panelLayout());
 
    for (var i = 0; i < MAX_TRACKS; i++) {
       var markedTrack = trackBank.getItemAt(i);

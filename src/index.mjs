@@ -82,18 +82,24 @@ server.registerTool("bitwig_status", {
 }, async () => call("status"));
 
 server.registerTool("bitwig_actions", {
-  description: "Search Bitwig Studio's native action registry by action id, name, or menu text.",
-  inputSchema: {
-    query: z.string().max(120).default("")
-  }
+  description: "Search Bitwig's action registry (menu and shortcut commands) by id, name, menu text or category. Ids are stable and English; names follow Bitwig's display language. Blocked actions (closing or replacing the project, quitting, answering dialogs) are listed with the reason.",
+  inputSchema: z.strictObject({
+    query: z.string().max(120).default("").describe("Case-insensitive part of id, name, menu text or category"),
+    category: z.string().min(1).optional().describe("Exact category id, e.g. arranger, clip_launcher, panel_management"),
+    offset: z.number().int().nonnegative().default(0),
+    limit: z.number().int().min(1).max(200).default(50),
+    includeCategories: z.boolean().default(false).describe("Also list every category id with its name and action count")
+  })
 }, async args => call("find_actions", args));
 
 server.registerTool("bitwig_invoke_action", {
-  description: "Invoke one exact Bitwig action id previously returned by bitwig_actions.",
-  inputSchema: {
-    actionId: z.string().min(1).max(160)
-  }
-}, async args => call("invoke_action", args));
+  description: "Run exactly one of: an action by exact id from bitwig_actions; command undo or redo (refused when there is nothing to undo or redo, confirmed through Bitwig's undo state); or panelLayout ARRANGE, MIX or EDIT (read back). Bitwig does not confirm actions, so the reply lists the project state the bridge saw change (tracks, scenes, selection, transport, undo state, panel layout).",
+  inputSchema: z.strictObject({
+    actionId: z.string().min(1).max(160).optional(),
+    command: z.enum(["undo", "redo"]).optional(),
+    panelLayout: z.enum(["ARRANGE", "MIX", "EDIT"]).optional()
+  })
+}, async args => call("invoke_action", args, 15000));
 
 server.registerTool("bitwig_transport", {
   description: "Read the transport (no fields), or change it: playback, arranger record, tempo, time signature, playhead position, arranger loop, metronome, pre-roll, overdub, automation write and default launch quantization. Settings are applied first, then position, then record and playback; every change is read back and the reply is the full transport state.",

@@ -26,6 +26,7 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 
 ## Tools
 
+- Search and run Bitwig's menu and shortcut actions, undo and redo, and switch the panel layout
 - Status and transport: playback, record, tempo, time signature, position, loop, metronome, pre-roll, overdub, automation write and launch quantization, all read back
 - List, create, position, and rename Arranger cue markers with readback verification
 - Read, write and edit launcher clips: name, color, loop, and notes with velocity, duration, timbre, pan and gain on a grid of up to 960 steps per beat
