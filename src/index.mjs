@@ -7,9 +7,9 @@ import { BitwigClient } from "./bitwig-client.mjs";
 import { buildPluginIndex, readPluginIndex, searchPluginIndex } from "./plugin-index.mjs";
 
 const client = new BitwigClient();
-const server = new McpServer({ name: "Bitwig Control Deck", version: "1.2.1" });
+const server = new McpServer({ name: "bitwig-agent-bridge", version: "1.2.1" });
 const logDirectory = new URL("../logs/", import.meta.url);
-const logFile = new URL("control-deck.jsonl", logDirectory);
+const logFile = new URL("bitwig-agent-bridge.jsonl", logDirectory);
 
 const trackSelector = {
   trackIndex: z.number().int().nonnegative().describe("Zero-based track index returned by bitwig_tracks"),
@@ -53,7 +53,7 @@ async function call(method, params = {}, timeoutMs) {
 }
 
 server.registerTool("bitwig_status", {
-  description: "Check Control Deck Bridge, Bitwig, the current project, transport, current selection, and whether Bitwig's audio engine is on.",
+  description: "Check Bitwig Agent Bridge, Bitwig, the current project, transport, current selection, and whether Bitwig's audio engine is on.",
   inputSchema: {}
 }, async () => call("status"));
 
@@ -105,7 +105,7 @@ server.registerTool("bitwig_track_meters", {
 }, async args => call("track_meters", args));
 
 server.registerTool("bitwig_plugins", {
-  description: "Search Control Deck's local inventory of installed VST3, VST2, Audio Unit, and CLAP plug-ins without opening Bitwig's Browser.",
+  description: "Search the bridge's local inventory of installed VST3, VST2, Audio Unit, and CLAP plug-ins without opening Bitwig's Browser.",
   inputSchema: {
     query: z.string().default(""),
     format: z.enum(["all", "VST3", "VST2", "AU", "CLAP"]).default("all"),
@@ -125,7 +125,7 @@ server.registerTool("bitwig_plugins", {
 });
 
 server.registerTool("bitwig_refresh_plugin_index", {
-  description: "Refresh Control Deck's read-only plug-in inventory after installing or removing audio plug-ins.",
+  description: "Refresh the bridge's read-only plug-in inventory after installing or removing audio plug-ins.",
   inputSchema: {}
 }, async () => {
   const startedAt = performance.now();
@@ -247,7 +247,7 @@ server.registerTool("bitwig_clip_notes", {
 }, async args => call("clip_notes", args, 120000));
 
 server.registerTool("bitwig_launch_scene", {
-  description: "Launch one Control Deck scene immediately and from the start across all tracks.",
+  description: "Launch one scene immediately and from the start across all tracks.",
   inputSchema: { slotIndex: z.number().int().min(0).max(1023).default(0) }
 }, async args => call("launch_scene", args));
 

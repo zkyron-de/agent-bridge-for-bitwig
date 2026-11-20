@@ -1,17 +1,17 @@
 loadAPI(18);
 
-host.defineController("Control Deck", "Control Deck Bridge", "1.2.1", "BC47EFA3-FFD7-4155-9AE6-164DB3E58E89");
+host.defineController("Bitwig Agent Bridge", "Bitwig Agent Bridge", "1.2.1", "8A319A60-5BAF-4C0D-B613-16D646B1E8A6", "_zkyron, based on Bitwig Control Deck by Remy Mazmanian");
 // No MIDI: all control data uses an authenticated local UDP channel that never
 // leaves this Mac. Without MIDI ports there is nothing for Bitwig to auto-detect,
 // so the controller is added once by hand in Settings → Controllers.
 host.defineMidiPorts(0, 0);
 
-var CONTROL_DECK_VERSION = "1.2.1";
-var CONTROL_DECK_PROTOCOL = "control-deck/1";
-var CONTROL_DECK_PORT = 50701;
+var BRIDGE_VERSION = "1.2.1";
+var BRIDGE_PROTOCOL = "bitwig-agent-bridge/1";
+var BRIDGE_PORT = 50701;
 // Stamped with a per-install secret by `npm run setup`. The bridge refuses to
 // start while the placeholder is still in place.
-var CONTROL_DECK_TOKEN = "__CONTROL_DECK_TOKEN__";
+var BRIDGE_TOKEN = "__BRIDGE_TOKEN__";
 var MAX_TRACKS = 128;
 var MAX_DEVICES = 64;
 var MAX_SCENES = 8;
@@ -89,7 +89,7 @@ function later(delay, callback) {
       try {
          callback();
       } catch (error) {
-         host.errorln("Control Deck step error: " + error);
+         host.errorln("Bitwig Agent Bridge step error: " + error);
          if (owner && !owner.done) finish(owner, false, { message: String(error.message || error) });
       }
    }, delay);
@@ -329,7 +329,7 @@ function requireTrack(params, allowDuplicateName) {
    if (!allowDuplicateName) {
       var sameName = trackIndicesNamed(currentName);
       if (sameName.length > 1) {
-         throw new Error("Tracks " + sameName.join(", ") + " are all named ‘" + currentName + "’, so Control Deck cannot be sure which one is meant. " +
+         throw new Error("Tracks " + sameName.join(", ") + " are all named ‘" + currentName + "’, so Bitwig Agent Bridge cannot be sure which one is meant. " +
             "Rename them with bitwig_rename_track so each name is unique, then try again.");
       }
    }
@@ -537,7 +537,7 @@ function remoteControlsSnapshot() {
 var authFailureCount = 0;
 
 function isAuthorized(request) {
-   return !!request && typeof request === "object" && request.token === CONTROL_DECK_TOKEN;
+   return !!request && typeof request === "object" && request.token === BRIDGE_TOKEN;
 }
 
 // Packets with a wrong token get no reply, so nothing on the machine can use
@@ -546,16 +546,16 @@ function isAuthorized(request) {
 function noteAuthFailure() {
    authFailureCount += 1;
    if (authFailureCount === 1) {
-      host.showPopupNotification("Control Deck Bridge ignored a request with the wrong auth token. Run `npm run setup` to reinstall the controller script.");
+      host.showPopupNotification("Bitwig Agent Bridge ignored a request with the wrong auth token. Run `npm run setup` to reinstall the controller script.");
    }
    if (authFailureCount === 1 || authFailureCount % 100 === 0) {
-      host.errorln("Control Deck Bridge ignored " + authFailureCount + " request(s) with the wrong auth token.");
+      host.errorln("Bitwig Agent Bridge ignored " + authFailureCount + " request(s) with the wrong auth token.");
    }
 }
 
 function encodeReply(id, ok, payload) {
    return encodeUtf8(JSON.stringify({
-      protocol: CONTROL_DECK_PROTOCOL,
+      protocol: BRIDGE_PROTOCOL,
       id: String(id),
       ok: Boolean(ok),
       payload: payload || {}
@@ -569,7 +569,7 @@ function respond(replyPort, id, ok, payload, method) {
    var what = method ? "the " + method + " reply" : "the reply";
    var bytes = encodeReply(id, ok, payload);
    if (bytes.length > MAX_REPLY_BYTES) {
-      host.errorln("Control Deck: " + what + " is " + bytes.length + " bytes, over the " + MAX_REPLY_BYTES + "-byte limit.");
+      host.errorln("Bitwig Agent Bridge: " + what + " is " + bytes.length + " bytes, over the " + MAX_REPLY_BYTES + "-byte limit.");
       bytes = encodeReply(id, false, {
          message: "Bitwig's answer is " + bytes.length + " bytes, over the " + MAX_REPLY_BYTES + "-byte limit for one reply. Ask for less, for example with a smaller limit, an offset or a query.",
          replyBytes: bytes.length,
@@ -579,14 +579,14 @@ function respond(replyPort, id, ok, payload, method) {
    try {
       host.sendDatagramPacket("127.0.0.1", Number(replyPort), bytes);
    } catch (error) {
-      host.errorln("Control Deck could not send " + what + " (" + bytes.length + " bytes): " + error);
+      host.errorln("Bitwig Agent Bridge could not send " + what + " (" + bytes.length + " bytes): " + error);
       try {
          host.sendDatagramPacket("127.0.0.1", Number(replyPort), encodeReply(id, false, {
             message: "Bitwig could not send " + what + " (" + bytes.length + " bytes): " + String(error.message || error),
             replyBytes: bytes.length
          }));
       } catch (secondError) {
-         host.errorln("Control Deck could not send the error reply either: " + secondError);
+         host.errorln("Bitwig Agent Bridge could not send the error reply either: " + secondError);
       }
    }
 }
@@ -599,7 +599,7 @@ function finish(request, ok, payload) {
       try {
          request.cleanup();
       } catch (error) {
-         host.errorln("Control Deck cleanup error: " + error);
+         host.errorln("Bitwig Agent Bridge cleanup error: " + error);
       }
    }
    request.done = true;
@@ -636,7 +636,7 @@ function processNextRequest() {
 
 function enqueue(source, id, method, params, timeoutMs) {
    if (requestQueue.length >= 32) {
-      respond(source, id, false, { message: "Control Deck Bridge is busy. Try the request again." });
+      respond(source, id, false, { message: "Bitwig Agent Bridge is busy. Try the request again." });
       return;
    }
    var clientTimeout = Number(timeoutMs);
@@ -1161,7 +1161,7 @@ function handleNestDevice(request) {
 // selected on the same track right before the key press.
 function handleSaveDevicePreset(request) {
    var params = request.params;
-   if (!saveToLibraryAction) throw new Error("This Bitwig version has no Save to Library action, so the preset can't be saved from Control Deck.");
+   if (!saveToLibraryAction) throw new Error("This Bitwig version has no Save to Library action, so the preset can't be saved from Bitwig Agent Bridge.");
    selectDevice(request, params, function(device) {
       try {
          var presetName = String(params.presetName || "").trim();
@@ -1507,7 +1507,7 @@ function handleCreateTrack(request) {
    var before = bankNames(bank, limit);
    if (bank.itemCount().get() >= limit) {
       throw new Error("The project already has " + bank.itemCount().get() + " " + (effect ? "effect" : "main") +
-         " tracks, and Control Deck can reach only the first " + limit + ". No track was created.");
+         " tracks, and Bitwig Agent Bridge can reach only the first " + limit + ". No track was created.");
    }
    if (params.kind === "instrument") application.createInstrumentTrack(-1);
    else if (params.kind === "audio") application.createAudioTrack(-1);
@@ -1687,7 +1687,7 @@ function handleRenameTrack(request) {
 
 function validateClipNotes(notes, stepSize, lengthBeats) {
    if (!Array.isArray(notes)) throw new Error("Clip notes must be an array.");
-   if (notes.length > 4096) throw new Error("A Control Deck clip can contain at most 4096 notes.");
+   if (notes.length > 4096) throw new Error("A Bitwig Agent Bridge clip can contain at most 4096 notes.");
    var pages = {};
    var noteCount = 0;
    for (var i = 0; i < notes.length; i++) {
@@ -2392,8 +2392,8 @@ function dispatch(request) {
       case "status":
          finish(request, true, {
             connected: true,
-            bridge: "Control Deck Bridge",
-            version: CONTROL_DECK_VERSION,
+            bridge: "Bitwig Agent Bridge",
+            version: BRIDGE_VERSION,
             apiVersion: 18,
             project: application.projectName().get(),
             projectModified: project.isModified().get(),
@@ -2796,7 +2796,7 @@ function dispatch(request) {
          });
          return;
       default:
-         throw new Error("Unknown Control Deck method: " + request.method);
+         throw new Error("Unknown Bitwig Agent Bridge method: " + request.method);
    }
 }
 
@@ -2872,7 +2872,7 @@ function init() {
    sceneBank = trackBank.sceneBank();
    interested(sceneBank.itemCount());
    interested(sceneBank.scrollPosition());
-   cursorTrack = host.createCursorTrack("CONTROL_DECK_TRACK_CURSOR", "Control Deck Track Cursor", 0, MAX_SCENES, true);
+   cursorTrack = host.createCursorTrack("AGENT_BRIDGE_TRACK_CURSOR", "Agent Bridge Track Cursor", 0, MAX_SCENES, true);
    cursorDevice = cursorTrack.createCursorDevice();
    cursorDeviceSlot = cursorDevice.getCursorSlot();
    cursorRemoteControlsPage = cursorDevice.createCursorRemoteControlsPage(8);
@@ -2966,7 +2966,7 @@ function init() {
       directValues = {};
       directDisplays = {};
       // Display strings are opt-in in Bitwig's Controller API. Observing the
-      // current device's IDs lets Control Deck verify enumerated routing parameters
+      // current device's IDs lets Bitwig Agent Bridge verify enumerated routing parameters
       // (for example a HW Instrument MIDI output) by their visible names.
       directDisplayObserver.setObservedParameterIds(directIds);
    });
@@ -3038,20 +3038,20 @@ function init() {
    }
    for (var c = 64; c < 128; c++) markBrowserItem(creatorBank.getItemAt(c));
 
-   if (CONTROL_DECK_TOKEN === "__CONTROL_DECK" + "_TOKEN__") {
-      host.showPopupNotification("Control Deck Bridge has no auth token. Run `npm run setup` and reinstall the controller script.");
-      host.errorln("Control Deck Bridge refused to start: the auth token placeholder was never stamped. Run `npm run setup` in the project folder.");
+   if (BRIDGE_TOKEN === "__BRIDGE" + "_TOKEN__") {
+      host.showPopupNotification("Bitwig Agent Bridge has no auth token. Run `npm run setup` and reinstall the controller script.");
+      host.errorln("Bitwig Agent Bridge refused to start: the auth token placeholder was never stamped. Run `npm run setup` in the project folder.");
       return;
    }
 
-   var datagramBound = host.addDatagramPacketObserver("Control Deck Bridge", CONTROL_DECK_PORT, function(data) {
+   var datagramBound = host.addDatagramPacketObserver("Bitwig Agent Bridge", BRIDGE_PORT, function(data) {
       var request = null;
       try {
          request = JSON.parse(decodeUtf8(data));
          var replyPort = Number(request.replyPort);
-         if (!request || request.protocol !== CONTROL_DECK_PROTOCOL || !request.id || !request.method ||
+         if (!request || request.protocol !== BRIDGE_PROTOCOL || !request.id || !request.method ||
              !isFinite(replyPort) || replyPort < 1024 || replyPort > 65535) {
-            throw new Error("Malformed Control Deck packet");
+            throw new Error("Malformed Bitwig Agent Bridge packet");
          }
          if (!isAuthorized(request)) {
             noteAuthFailure();
@@ -3059,19 +3059,19 @@ function init() {
          }
          enqueue(replyPort, String(request.id), String(request.method), request.params || {}, request.timeoutMs);
       } catch (error) {
-         host.println("Control Deck request error: " + error);
+         host.println("Bitwig Agent Bridge request error: " + error);
          if (isAuthorized(request) && request.id && request.replyPort) {
-            respond(request.replyPort, request.id, false, { message: "Invalid Control Deck request: " + error });
+            respond(request.replyPort, request.id, false, { message: "Invalid Bitwig Agent Bridge request: " + error });
          }
       }
    });
-   if (!datagramBound) throw new Error("Control Deck could not bind UDP port " + CONTROL_DECK_PORT);
-   host.showPopupNotification("Control Deck Bridge online");
-   host.println("Control Deck Bridge " + CONTROL_DECK_VERSION + " listening on UDP " + CONTROL_DECK_PORT);
+   if (!datagramBound) throw new Error("Bitwig Agent Bridge could not bind UDP port " + BRIDGE_PORT);
+   host.showPopupNotification("Bitwig Agent Bridge online");
+   host.println("Bitwig Agent Bridge " + BRIDGE_VERSION + " listening on UDP " + BRIDGE_PORT);
 }
 
 function flush() {}
 
 function exit() {
-   host.println("Control Deck Bridge offline");
+   host.println("Bitwig Agent Bridge offline");
 }

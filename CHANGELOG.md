@@ -11,6 +11,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Renamed the project to **Bitwig Agent Bridge**: package and MCP server name `bitwig-agent-bridge`, controller script `controller/BitwigAgentBridge.control.js` (vendor and name "Bitwig Agent Bridge", new extension UUID), install folder `Controller Scripts/Bitwig Agent Bridge/`, wire protocol `bitwig-agent-bridge/1`, environment variables `BITWIG_AGENT_BRIDGE_HOST`, `_PORT` and `_TOKEN`, and request log `logs/bitwig-agent-bridge.jsonl`. The UDP port stays 50701. An installed Control Deck script does not talk to the renamed server; remove it from Bitwig and add Bitwig Agent Bridge instead.
+- The controller uses the non-deprecated five-argument `defineController` with an author.
 - `npm run setup` now only installs dependencies, creates the bridge secret, and installs the controller script. `--skip-build` and `--skip-agents` are gone; `--skip-install` skips `npm install`.
 
 ## [1.2.1] - 2026-10-28

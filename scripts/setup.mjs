@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Local setup for Bitwig Control Deck. Safe to re-run at any time.
+// Local setup for Bitwig Agent Bridge. Safe to re-run at any time.
 //
 //   npm run setup                       install deps, create the secret,
 //                                       install the controller script
@@ -18,9 +18,9 @@ const root = path.dirname(fileURLToPath(new URL("../package.json", import.meta.u
 const args = new Set(process.argv.slice(2));
 
 const tokenFile = path.join(root, "data", "bridge-token");
-const controllerSource = path.join(root, "controller", "ControlDeck.control.js");
-const controllerTargetDirectory = path.join(homedir(), "Documents", "Bitwig Studio", "Controller Scripts", "Control Deck");
-const controllerTarget = path.join(controllerTargetDirectory, "ControlDeck.control.js");
+const controllerSource = path.join(root, "controller", "BitwigAgentBridge.control.js");
+const controllerTargetDirectory = path.join(homedir(), "Documents", "Bitwig Studio", "Controller Scripts", "Bitwig Agent Bridge");
+const controllerTarget = path.join(controllerTargetDirectory, "BitwigAgentBridge.control.js");
 
 let failures = 0;
 
@@ -28,7 +28,7 @@ function ok(message) { console.log(`  ✓ ${message}`); }
 function fail(message) { failures += 1; console.log(`  ✗ ${message}`); }
 function heading(message) { console.log(`\n${message}`); }
 
-heading("Bitwig Control Deck setup");
+heading("Bitwig Agent Bridge setup");
 console.log(`  Install location: ${root}`);
 
 const nodeMajor = Number(process.versions.node.split(".")[0]);
@@ -64,9 +64,9 @@ const token = (await readFile(tokenFile, "utf8")).trim();
 if (!args.has("--skip-controller")) {
   heading("Bitwig controller script");
   const source = await readFile(controllerSource, "utf8");
-  const placeholder = "__CONTROL_DECK_TOKEN__";
+  const placeholder = "__BRIDGE_TOKEN__";
   if (!source.includes(placeholder)) {
-    fail(`controller/ControlDeck.control.js is missing the token placeholder ${placeholder}.`);
+    fail(`controller/BitwigAgentBridge.control.js is missing the token placeholder ${placeholder}.`);
   } else {
     await mkdir(controllerTargetDirectory, { recursive: true });
     await writeFile(controllerTarget, source.replace(placeholder, token), { mode: 0o600 });
@@ -82,9 +82,9 @@ if (failures > 0) {
 
 heading("Setup complete. Next steps:");
 console.log(`
-  1. In Bitwig: Settings → Controllers → + Add Controller → vendor
-     "Control Deck" → "Control Deck Bridge". (Already added? Toggle its power
-     button off and on so Bitwig reloads the script.)
+  1. In Bitwig: Settings → Controllers → + Add Controller → vendor and
+     controller "Bitwig Agent Bridge". (Already added? Toggle its power button
+     off and on so Bitwig reloads the script.)
   2. Register the MCP server with your agent, for example Claude Code:
      claude mcp add bitwig -- node ${path.join(root, "src", "index.mjs")}
 `);

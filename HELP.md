@@ -1,12 +1,12 @@
-# Bitwig Control Deck — Help & Reference
+# Bitwig Agent Bridge — Help & Reference
 
-Everything about installing, using, troubleshooting, and understanding Bitwig Control Deck. For a quick start, see the [README](README.md); this file is the complete reference.
+Everything about installing, using, troubleshooting, and understanding Bitwig Agent Bridge. For a quick start, see the [README](README.md); this file is the complete reference.
 
 ---
 
 ## Contents
 
-1. [What Control Deck is](#what-control-deck-is)
+1. [What Bitwig Agent Bridge is](#what-bitwig-agent-bridge-is)
 2. [Compatibility](#compatibility)
 3. [The pieces](#the-pieces)
 4. [Installing](#installing)
@@ -20,9 +20,9 @@ Everything about installing, using, troubleshooting, and understanding Bitwig Co
 
 ---
 
-## What Control Deck is
+## What Bitwig Agent Bridge is
 
-Bitwig Control Deck lets an SI agent operate Bitwig Studio the way a careful engineer would: every action names its exact target, ambiguous requests are refused, and every change is read back from Bitwig before being reported as done. It speaks the [Model Context Protocol](https://modelcontextprotocol.io) (MCP), an open standard for connecting agents to tools.
+Bitwig Agent Bridge lets an SI agent operate Bitwig Studio the way a careful engineer would: every action names its exact target, ambiguous requests are refused, and every change is read back from Bitwig before being reported as done. It speaks the [Model Context Protocol](https://modelcontextprotocol.io) (MCP), an open standard for connecting agents to tools.
 
 ## Compatibility
 
@@ -36,7 +36,7 @@ Only the controller-script install path in `scripts/setup.mjs` and the plug-in s
 
 ## The pieces
 
-1. **The controller script** (`controller/ControlDeck.control.js`) — a Bitwig controller extension that runs *inside* Bitwig. It listens on local UDP port `50701` for authenticated requests and is the only thing that actually touches your project. Installed into Bitwig by setup with your private secret stamped in.
+1. **The controller script** (`controller/BitwigAgentBridge.control.js`) — a Bitwig controller extension that runs *inside* Bitwig. It listens on local UDP port `50701` for authenticated requests and is the only thing that actually touches your project. Installed into Bitwig by setup with your private secret stamped in.
 2. **The MCP server** (`src/index.mjs`) — the part your SI agent talks to. Each agent launches its own copy on demand over stdio (it is not a background service) and it relays requests to the controller script.
 
 ## Installing
@@ -45,16 +45,16 @@ Run `npm run setup` in the checkout. It installs the MCP server's dependencies, 
 
 ## Setting up Bitwig
 
-Setup installs the controller script into Bitwig's default controller-script folder (`~/Documents/Bitwig Studio/Controller Scripts/Control Deck/`). Add it once:
+Setup installs the controller script into Bitwig's default controller-script folder (`~/Documents/Bitwig Studio/Controller Scripts/Bitwig Agent Bridge/`). Add it once:
 
 1. In Bitwig, open the Dashboard (the Bitwig logo, top center) → **Settings** → **Controllers**.
 2. Click **+ Add Controller**.
-3. Choose vendor **Control Deck**, then **Control Deck Bridge**, and click **Add**.
-4. The entry's power button should be on. You'll see the **"Control Deck Bridge online"** popup, and the script console (the `>` icon on the controller entry) logs `Control Deck Bridge <version> listening on UDP 50701`.
+3. Choose vendor **Bitwig Agent Bridge**, then the controller of the same name, and click **Add**.
+4. The entry's power button should be on. You'll see the **"Bitwig Agent Bridge online"** popup, and the script console (the `>` icon on the controller entry) logs `Bitwig Agent Bridge <version> listening on UDP 50701`.
 
 **Reloading.** After re-running setup (which re-stamps the secret into the controller script), make Bitwig reload it: restart Bitwig, or toggle the controller's power button off and on in Settings → Controllers.
 
-**If the controller isn't listed at all**, Bitwig is probably looking in a non-default location: Settings → **Locations** → "My Controller Scripts" should point at `~/Documents/Bitwig Studio/Controller Scripts` (the default). If you've customized it, either restore the default or copy the `Control Deck` folder into your custom location — but always the setup-installed copy, never the repo file, which has no secret stamped in.
+**If the controller isn't listed at all**, Bitwig is probably looking in a non-default location: Settings → **Locations** → "My Controller Scripts" should point at `~/Documents/Bitwig Studio/Controller Scripts` (the default). If you've customized it, either restore the default or copy the `Bitwig Agent Bridge` folder into your custom location — but always the setup-installed copy, never the repo file, which has no secret stamped in.
 
 ## Connecting SI agents
 
@@ -64,18 +64,18 @@ Setup installs the controller script into Bitwig's default controller-script fol
 
 ### Setup snippets
 
-Replace `/path/to/bitwig-control-deck` with your install folder. The server name `bitwig` is up to you.
+Replace `/path/to/bitwig-agent-bridge` with your install folder. The server name `bitwig` is up to you.
 
 **Claude Code** — adds it for every project:
 
 ```sh
-claude mcp add --scope user bitwig -- node /path/to/bitwig-control-deck/src/index.mjs
+claude mcp add --scope user bitwig -- node /path/to/bitwig-agent-bridge/src/index.mjs
 ```
 
 **OpenAI Codex** — the CLI, IDE extension and desktop app share this setting:
 
 ```sh
-codex mcp add bitwig -- node /path/to/bitwig-control-deck/src/index.mjs
+codex mcp add bitwig -- node /path/to/bitwig-agent-bridge/src/index.mjs
 ```
 
 Or add it to `~/.codex/config.toml`:
@@ -83,23 +83,23 @@ Or add it to `~/.codex/config.toml`:
 ```toml
 [mcp_servers.bitwig]
 command = "node"
-args = ["/path/to/bitwig-control-deck/src/index.mjs"]
+args = ["/path/to/bitwig-agent-bridge/src/index.mjs"]
 ```
 
 **Grok CLI** — saves it to `~/.grok/config.toml`:
 
 ```sh
-grok mcp add bitwig -- node /path/to/bitwig-control-deck/src/index.mjs
+grok mcp add bitwig -- node /path/to/bitwig-agent-bridge/src/index.mjs
 ```
 
-**GitHub Copilot in VS Code** — run **MCP: Add Server** from the Command Palette, choose **Command (stdio)**, enter `node /path/to/bitwig-control-deck/src/index.mjs`, name it `bitwig`, then pick **Global** → **Copilot Global**. That writes `~/.copilot/mcp-config.json`, which you can also edit directly:
+**GitHub Copilot in VS Code** — run **MCP: Add Server** from the Command Palette, choose **Command (stdio)**, enter `node /path/to/bitwig-agent-bridge/src/index.mjs`, name it `bitwig`, then pick **Global** → **Copilot Global**. That writes `~/.copilot/mcp-config.json`, which you can also edit directly:
 
 ```json
 {
   "mcpServers": {
     "bitwig": {
       "command": "node",
-      "args": ["/path/to/bitwig-control-deck/src/index.mjs"]
+      "args": ["/path/to/bitwig-agent-bridge/src/index.mjs"]
     }
   }
 }
@@ -112,7 +112,7 @@ grok mcp add bitwig -- node /path/to/bitwig-control-deck/src/index.mjs
   "mcpServers": {
     "bitwig": {
       "command": "node",
-      "args": ["/path/to/bitwig-control-deck/src/index.mjs"]
+      "args": ["/path/to/bitwig-agent-bridge/src/index.mjs"]
     }
   }
 }
@@ -123,7 +123,7 @@ Merge it into the file each one reads, then restart it or refresh its MCP list:
 - **Claude Desktop:** Settings → Developer → Edit Config opens `~/Library/Application Support/Claude/claude_desktop_config.json`.
 - **Cursor:** `~/.cursor/mcp.json`, or `.cursor/mcp.json` in a project.
 - **Windsurf:** in the Cascade panel, open the `...` menu and choose **Open MCP config file** to edit `mcp_config.json`.
-- **Cline:** click the MCP Servers icon in the Cline panel, open **Configure**, then **Configure MCP Servers**. The Cline CLI can add it in one line: `cline mcp add bitwig --yes -- node /path/to/bitwig-control-deck/src/index.mjs`.
+- **Cline:** click the MCP Servers icon in the Cline panel, open **Configure**, then **Configure MCP Servers**. The Cline CLI can add it in one line: `cline mcp add bitwig --yes -- node /path/to/bitwig-agent-bridge/src/index.mjs`.
 
 ## MCP tool reference
 
@@ -131,7 +131,7 @@ All 35 tools follow the same contract: **exact targets** (mutations require both
 
 ### Status & session
 
-- **bitwig_status** — Check Control Deck Bridge, Bitwig, the current project, transport, current selection, and whether Bitwig's audio engine is on.
+- **bitwig_status** — Check Bitwig Agent Bridge, Bitwig, the current project, transport, current selection, and whether Bitwig's audio engine is on.
 - **bitwig_actions** — Search Bitwig Studio's native action registry by action id, name, or menu text. Matching ignores case, returns up to 100 actions, and reports how many matched in total.
 - **bitwig_invoke_action** — Invoke one exact Bitwig action id previously returned by `bitwig_actions`.
 - **bitwig_transport** — Read or control Bitwig transport. Tempo changes are read back before success is reported.
@@ -182,7 +182,7 @@ All 35 tools follow the same contract: **exact targets** (mutations require both
 
 ### Plug-in library
 
-- **bitwig_plugins** — Search Control Deck's local inventory of installed VST3, VST2, AU, and CLAP plug-ins without opening Bitwig's Browser.
+- **bitwig_plugins** — Search the bridge's local inventory of installed VST3, VST2, AU, and CLAP plug-ins without opening Bitwig's Browser.
 - **bitwig_refresh_plugin_index** — Rebuild that inventory after installing or removing plug-ins.
 
 ## Files and locations
@@ -191,24 +191,24 @@ All 35 tools follow the same contract: **exact targets** (mutations require both
 |---|---|
 | Per-install secret | `<install>/data/bridge-token` |
 | Plug-in inventory | `<install>/data/plugin-index.json` |
-| MCP request log | `<install>/logs/control-deck.jsonl` |
-| Controller script (installed copy) | `~/Documents/Bitwig Studio/Controller Scripts/Control Deck/` |
+| MCP request log | `<install>/logs/bitwig-agent-bridge.jsonl` |
+| Controller script (installed copy) | `~/Documents/Bitwig Studio/Controller Scripts/Bitwig Agent Bridge/` |
 
 Port (loopback-only): `50701/udp` bridge.
 
 ## Troubleshooting
 
-**Tools time out.** Bitwig isn't open, or the controller isn't active. In Bitwig: Settings → Controllers → confirm "Control Deck Bridge" exists and is enabled. `bitwig_status` is the cheapest way to check what the agent sees.
+**Tools time out.** Bitwig isn't open, or the controller isn't active. In Bitwig: Settings → Controllers → confirm "Bitwig Agent Bridge" exists and is enabled. `bitwig_status` is the cheapest way to check what the agent sees.
 
-**Requests time out even though Control Deck Bridge is enabled.** The controller script and the MCP server may disagree about the secret, usually because the controller was installed before the current `data/bridge-token`. The bridge ignores requests with the wrong secret without replying, shows a popup in Bitwig the first time, and logs the count. Run setup again (it re-stamps the controller), then reload the controller in Bitwig.
+**Requests time out even though Bitwig Agent Bridge is enabled.** The controller script and the MCP server may disagree about the secret, usually because the controller was installed before the current `data/bridge-token`. The bridge ignores requests with the wrong secret without replying, shows a popup in Bitwig the first time, and logs the count. Run setup again (it re-stamps the controller), then reload the controller in Bitwig.
 
-**The controller refuses to start and mentions a missing token.** The repo copy of the controller was installed by hand instead of through setup, so the secret placeholder was never stamped. Run setup; never copy `controller/ControlDeck.control.js` into Bitwig manually.
+**The controller refuses to start and mentions a missing token.** The repo copy of the controller was installed by hand instead of through setup, so the secret placeholder was never stamped. Run setup; never copy `controller/BitwigAgentBridge.control.js` into Bitwig manually.
 
-**A tool says several tracks "are all named" the same.** Bitwig's controller API version 18 gives tracks no permanent ID, so Control Deck finds a track by its position and checks its name. When two tracks share a name, that check can't catch a track that moved, so tools refuse them. `bitwig_tracks` lists the clashing names under `duplicateNames`. Give each track a unique name, in Bitwig or with `bitwig_rename_track`, which still works on duplicates and refuses a name another track already has.
+**A tool says several tracks "are all named" the same.** Bitwig's controller API version 18 gives tracks no permanent ID, so Bitwig Agent Bridge finds a track by its position and checks its name. When two tracks share a name, that check can't catch a track that moved, so tools refuse them. `bitwig_tracks` lists the clashing names under `duplicateNames`. Give each track a unique name, in Bitwig or with `bitwig_rename_track`, which still works on duplicates and refuses a name another track already has.
 
 **Save to Library opened, but nothing was saved.** Bitwig's API can open the dialog but can't type into it, so `bitwig_save_device_preset` leaves the dialog open for you to name and save. With `confirm: true` it presses Enter to accept the prefilled name, and only when the same device is still selected. Compare `presetNameBefore` and `presetNameAfter` in the reply, then check the Library.
 
-**The selected track flickers while a tool runs.** Device, sample and clip tools work through Bitwig's selection, so they select their track for a moment. When the tool finishes, Control Deck selects your track again, and your device too when the tool worked on that same track. Selection is left alone when your track moved or was deleted, and when you had the master, an effect track or a track past the first 128 selected. `bitwig_create_track` still leaves the new track selected.
+**The selected track flickers while a tool runs.** Device, sample and clip tools work through Bitwig's selection, so they select their track for a moment. When the tool finishes, Bitwig Agent Bridge selects your track again, and your device too when the tool worked on that same track. Selection is left alone when your track moved or was deleted, and when you had the master, an effect track or a track past the first 128 selected. `bitwig_create_track` still leaves the new track selected.
 
 **Plug-in list is empty or stale.** Run `bitwig_refresh_plugin_index` or `npm run index:plugins`.
 
@@ -219,14 +219,14 @@ Port (loopback-only): `50701/udp` bridge.
 ## Uninstalling
 
 ```sh
-rm -rf ~/Documents/"Bitwig Studio"/"Controller Scripts"/"Control Deck"
+rm -rf ~/Documents/"Bitwig Studio"/"Controller Scripts"/"Bitwig Agent Bridge"
 ```
 
-Then remove the controller in Bitwig's Settings → Controllers, delete the install folder, and remove the server from your agent (for Claude Code: `claude mcp remove bitwig`). Control Deck writes nowhere else.
+Then remove the controller in Bitwig's Settings → Controllers, delete the install folder, and remove the server from your agent (for Claude Code: `claude mcp remove bitwig`). Bitwig Agent Bridge writes nowhere else.
 
 ## Security model
 
 - Everything binds to `127.0.0.1`. Nothing listens on, or connects to, any network.
 - Every bridge request carries a per-install secret generated on your machine and never committed anywhere. The controller refuses to run without one.
 - Mutations require exact index-plus-name targets and are refused on mismatch or ambiguity, so a confused agent fails loudly instead of editing the wrong thing.
-- The MCP server logs requests locally to `logs/control-deck.jsonl` so you can audit what an agent did.
+- The MCP server logs requests locally to `logs/bitwig-agent-bridge.jsonl` so you can audit what an agent did.

@@ -17,7 +17,7 @@ test("a reply under the limit goes out unchanged", () => {
   context.respond(4000, "1", true, { text: "Rémy" }, "status");
   assert.equal(sent.length, 1);
   assert.equal(sent[0].port, 4000);
-  assert.deepEqual(sent[0].reply, { protocol: "control-deck/1", id: "1", ok: true, payload: { text: "Rémy" } });
+  assert.deepEqual(sent[0].reply, { protocol: "bitwig-agent-bridge/1", id: "1", ok: true, payload: { text: "Rémy" } });
 });
 
 test("an oversized reply becomes a clear error that fits", () => {
