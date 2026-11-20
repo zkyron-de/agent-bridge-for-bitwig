@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Setup finds Bitwig's user folder on Windows and Linux as well as macOS, and takes `--controller-dir` for a moved controller-script folder. Windows and Linux are untested so far.
+- Linux support: tested with Bitwig 6.1.7 as Flatpak on Kubuntu. Setup finds Bitwig's user folder on Linux and Windows as well as macOS, and takes `--controller-dir` for a moved controller-script folder. Windows is untested so far.
 - `npm run smoke` checks the whole chain against a running Bitwig; `--write` also creates, checks and deletes a test track.
 
 ### Changed

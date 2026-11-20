@@ -6,11 +6,11 @@ The [README](../README.md#quick-start) has the short version for Claude Code. Th
 
 | Requirement | Minimum |
 |---|---|
-| System | macOS 13 Ventura or newer (Apple silicon and Intel). Windows and Linux are untested so far, see below. |
+| System | macOS 13 Ventura or newer (Apple silicon and Intel), or Linux. Windows is untested so far, see below. |
 | Bitwig Studio | 6.x with Controller API 25 (tested with 6.1.7) |
 | Node.js | 20 or newer |
 
-**Windows and Linux.** Nothing in the bridge is tied to macOS, and setup knows where Bitwig keeps its files on each system, but only macOS has been tested so far. If you try it on Windows or Linux, run the [smoke test](#check-the-connection) and [open an issue](https://github.com/zkyron-de/agent-bridge-for-bitwig/issues/new/choose) with its output, whether it passes or not.
+**Tested on** macOS with Bitwig 6.1.7, and Linux with Bitwig 6.1.7 as Flatpak on Kubuntu. Setup also knows where Bitwig keeps its files on Windows, but that has not been tested yet. If you try it on Windows, or on a Linux setup that differs, run the [smoke test](#check-the-connection) and [open an issue](https://github.com/zkyron-de/agent-bridge-for-bitwig/issues/new/choose) with its output, whether it passes or not.
 
 ## Install
 
@@ -28,7 +28,7 @@ Setup looks for Bitwig's user folder, which Bitwig creates on its first start, s
 |---|---|
 | macOS | `~/Documents/Bitwig Studio` |
 | Windows | `Bitwig Studio` in your Documents folder, also when Documents is redirected, for example into OneDrive |
-| Linux | `~/Bitwig Studio`, then `~/Documents/Bitwig Studio` |
+| Linux | `~/Bitwig Studio` (also for the Flatpak), then `~/Documents/Bitwig Studio` |
 
 The script goes into `Controller Scripts/Agent Bridge for Bitwig/` inside it.
 
