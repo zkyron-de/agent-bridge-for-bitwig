@@ -10,7 +10,7 @@ The [README](../README.md#quick-start) has the short version for Claude Code. Th
 | Bitwig Studio | 6.x with Controller API 25 (tested with 6.1.7) |
 | Node.js | 20 or newer |
 
-**Tested on** macOS and Linux with Bitwig 6.1.7 (on Linux as Flatpak on Kubuntu), and on Windows 11. Loading a sample by a Windows path (`C:\…`) has not been tried in Bitwig yet. If your setup differs, run the [smoke test](#check-the-connection) and [open an issue](https://github.com/zkyron-de/agent-bridge-for-bitwig/issues/new/choose) with its output, whether it passes or not.
+**Tested on** macOS, Windows 11 and Linux with Bitwig 6.1.7 (on Linux as Flatpak on Kubuntu). Loading a sample by a Windows path (`C:\…`) has not been tried in Bitwig yet. If your setup differs, run the [smoke test](#check-the-connection) and [open an issue](https://github.com/zkyron-de/agent-bridge-for-bitwig/issues/new/choose) with its output, whether it passes or not.
 
 ## Install
 
