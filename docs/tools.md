@@ -404,7 +404,7 @@ Load a WAV, AIFF or FLAC file by absolute path into a new Sampler on an instrume
 | `trackId` | string | UUID | required | Track id from bitwig_tracks; it stays the same when the track is renamed or moved |
 | `beforeDeviceIndex` | integer | ≥ 0 | optional | Insert right before this device (index from bitwig_devices); default is the end of the chain |
 | `beforeDeviceName` | string | not empty | optional | Exact name of that device; required with beforeDeviceIndex as a safety check |
-| `path` | string | not empty | required | Absolute file path on this Mac |
+| `path` | string | not empty | required | Absolute file path on this computer |
 <!-- inputs:end -->
 
 ### bitwig_set_device

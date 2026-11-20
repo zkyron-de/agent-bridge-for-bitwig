@@ -51,6 +51,8 @@ Controller API calls are checked against the reference bundled with Bitwig Studi
 | `src/tools.mjs` | Tool names, descriptions and strict input schemas |
 | `src/bitwig-client.mjs` | UDP client that talks to the controller |
 | `scripts/setup.mjs` | Install: dependencies, secret, controller script |
+| `scripts/bitwig-folder.mjs` | Finds Bitwig's controller-script folder on macOS, Windows and Linux |
+| `scripts/smoke.mjs` | End-to-end check against a running Bitwig (`npm run smoke`) |
 | `scripts/check-api.mjs` | API name check against Bitwig's reference |
 | `scripts/tool-docs.mjs` | Generates the Inputs tables in `docs/tools.md` from the schemas |
 | `test/` | Unit tests with fake Bitwig objects, and the registry test |

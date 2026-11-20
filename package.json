@@ -16,10 +16,11 @@
   "scripts": {
     "start": "node src/index.mjs",
     "setup": "node scripts/setup.mjs",
+    "smoke": "node scripts/smoke.mjs",
     "check:api": "node scripts/check-api.mjs",
     "docs": "node scripts/tool-docs.mjs",
-    "check": "node --check src/index.mjs && node --check src/tools.mjs && node --check src/bitwig-client.mjs && node --check scripts/setup.mjs && node --check scripts/check-api.mjs && node --check scripts/tool-docs.mjs && node --check controller/AgentBridgeForBitwig.control.js",
-    "test": "node --test test/*.test.mjs"
+    "check": "node --check src/index.mjs && node --check src/tools.mjs && node --check src/bitwig-client.mjs && node --check scripts/setup.mjs && node --check scripts/bitwig-folder.mjs && node --check scripts/smoke.mjs && node --check scripts/check-api.mjs && node --check scripts/tool-docs.mjs && node --check controller/AgentBridgeForBitwig.control.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

@@ -55,6 +55,8 @@ var BROWSER_SETTLE_MS = 1000;
 var INSERT_FIRST_CHECK_MS = 300;
 var INSERT_WAIT_ATTEMPTS = 50;
 var SAMPLE_FILE_PATTERN = /\.(wav|aif|aiff|flac)$/i;
+// Absolute paths: /… on macOS and Linux; C:\… or C:/… and \\server\… on Windows.
+var ABSOLUTE_PATH_PATTERN = /^(\/|[A-Za-z]:[\\\/]|\\\\)/;
 // Device parameters: direct writes use 128 steps (the resolution Bitwig's own
 // generic controller scripts use), reads and writes agree within
 // PARAMETER_TOLERANCE, and replies carry at most MAX_PARAMETERS_PER_REPLY.
@@ -1147,7 +1149,7 @@ function handleInsertDevice(request) {
 function handleInsertSample(request) {
    var params = request.params;
    var path = String(params.path || "");
-   if (path.charAt(0) !== "/" || !SAMPLE_FILE_PATTERN.test(path)) {
+   if (!ABSOLUTE_PATH_PATTERN.test(path) || !SAMPLE_FILE_PATTERN.test(path)) {
       throw new Error("path must be an absolute path to a WAV, AIFF or FLAC file.");
    }
    selectTrack(request, params, function(track) {

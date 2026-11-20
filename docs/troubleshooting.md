@@ -20,6 +20,6 @@
 
 **"Bitwig's answer is … bytes, over the 60000-byte limit for one reply."** Each answer from Bitwig travels in one local network message, capped at 60,000 bytes. Ask for less at once: a smaller `limit`, an `offset`, or a `query` filter.
 
-**"Bitwig could not send the … reply."** macOS refused the message from Bitwig, usually because it was larger than the system allows for one message. Ask for less at once, as above. The Controller Script Console shows the same error with the size.
+**"Bitwig could not send the … reply."** The operating system refused the message from Bitwig, usually because it was larger than the system allows for one message. Ask for less at once, as above. The Controller Script Console shows the same error with the size.
 
 Still stuck? [Open an issue](https://github.com/zkyron-de/agent-bridge-for-bitwig/issues/new/choose) with the bug report form.

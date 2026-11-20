@@ -4,6 +4,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Windows and Linux support, tested with Bitwig 6.1.7 on Windows 11 and, as Flatpak, on Kubuntu. Setup finds Bitwig's user folder on each system and takes `--controller-dir` for a moved controller-script folder.
+- `npm run smoke` checks the whole chain against a running Bitwig; `--write` also creates, checks and deletes a test track.
+
+### Changed
+
+- `bitwig_insert_sample` accepts Windows paths such as `C:\Samples\kick.wav`.
+- Setup stops with a clear message if it cannot find Bitwig's user folder, instead of creating one.
+
 ## [2.0.0] - 2026-11-20
 
 Agent Bridge for Bitwig 2.0.0 is the first release under the new name. Tools, their names and their fields changed incompatibly from Bitwig Control Deck 1.x.

@@ -27,8 +27,8 @@ body:
   - type: input
     id: system
     attributes:
-      label: macOS and Node.js versions
-      placeholder: "macOS 15.4, Node.js 22.11"
+      label: System and Node.js versions
+      placeholder: "macOS 15.4 / Windows 11 / Ubuntu 24.04 (Flatpak), Node.js 22.11"
     validations:
       required: true
   - type: input
