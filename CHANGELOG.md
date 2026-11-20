@@ -38,6 +38,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Issue forms for bug reports and feature requests (blank issues are off), and a Support section in the README.
 - New logo, a light and a dark README banner and a social preview image in `assets/`; the README gets badges, quick links and example requests.
 - The README now holds the Claude Code setup, the complete tool reference and a Limitations section with everything measured in Bitwig 6.1.7; HELP.md keeps the other agents, troubleshooting and uninstalling.
 - The bridge reaches the first 64 main tracks and 16 effect tracks (was 128 and 32), with 8 sends per track, and 32 devices per track (was 64).

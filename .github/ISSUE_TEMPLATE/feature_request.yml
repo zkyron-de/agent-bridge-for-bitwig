@@ -1,0 +1,22 @@
+name: Feature request
+description: Something an agent should be able to do in Bitwig that the tools do not cover yet.
+title: "[Idea] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The bridge can only do what Bitwig's Controller API offers. What it does not cover yet, and why, is listed under [Limitations](https://github.com/zkyron-de/bitwig-agent-bridge/blob/main/README.md#limitations).
+  - type: textarea
+    id: goal
+    attributes:
+      label: What should the agent be able to do?
+      placeholder: "Set the loop region of an arranger clip."
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why, and how you do it today
+    validations:
+      required: true

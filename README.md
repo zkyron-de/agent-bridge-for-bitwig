@@ -193,6 +193,10 @@ npm run check:api      # check every API method the controller calls against Bit
 
 The registry test fails when there are more than 25 tools, a schema accepts unknown fields, a tool and the controller disagree about a method, or this tool reference misses a tool.
 
+## Support
+
+Bitwig Agent Bridge is a hobby project, maintained on a best-effort basis. Found a bug or missing something? [Open an issue](https://github.com/zkyron-de/bitwig-agent-bridge/issues/new/choose) with the form; it asks for the Bitwig version and display language, which matter for many reports.
+
 ## Origin and license
 
 Bitwig Agent Bridge is based on [Bitwig Control Deck](https://github.com/remymazmanian/bitwig-control-deck) by Remy Mazmanian, released under the MIT License. The original copyright notice is kept in [LICENSE](LICENSE).
