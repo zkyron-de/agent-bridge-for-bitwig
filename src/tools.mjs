@@ -192,7 +192,7 @@ export function registerTools(server, call) {
     inputSchema: z.strictObject({
       ...trackSelector,
       ...insertBefore,
-      path: z.string().min(1).describe("Absolute file path on this Mac")
+      path: z.string().min(1).describe("Absolute file path on this computer")
     })
   }, async args => call("insert_sample", args, 30000));
 

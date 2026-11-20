@@ -249,6 +249,24 @@ test("insert_sample loads a file into a sampler on an instrument track", () => {
   assert.equal(chain[0].sampleName, "kick.wav");
 });
 
+for (const path of ["C:\\Samples\\kick.wav", "C:/Samples/kick.wav", "\\\\server\\Samples\\kick.wav"]) {
+  test(`insert_sample accepts the Windows path ${path}`, () => {
+    const { run, log } = setup({ devices: [], trackType: "Instrument" });
+    const response = run("insert_sample", { path });
+    assert.equal(response.ok, true, JSON.stringify(response.payload));
+    assert.ok(log.some(entry => entry[0] === "file"));
+  });
+}
+
+for (const path of ["Samples/kick.wav", "C:kick.wav", "~/Samples/kick.wav", "/Samples/kick.mp3"]) {
+  test(`insert_sample refuses ${path}`, () => {
+    const { run, log } = setup({ devices: [], trackType: "Instrument" });
+    const response = run("insert_sample", { path });
+    assert.match(response.payload.message, /path must be an absolute path to a WAV, AIFF or FLAC file/);
+    assert.ok(!log.some(entry => entry[0] === "file"));
+  });
+}
+
 test("insert_sample refuses an audio track, where Bitwig would load a Convolution", () => {
   const { run, log } = setup({ trackType: "Audio" });
   const response = run("insert_sample", { path: "/Samples/kick.wav" });
