@@ -6,8 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting. Bitwig Agent Bridge is a hobby project, maintained on a best-effort basis.
-        Please check the [Limitations](https://github.com/zkyron-de/bitwig-agent-bridge/blob/main/docs/limitations.md) and [Troubleshooting](https://github.com/zkyron-de/bitwig-agent-bridge/blob/main/docs/troubleshooting.md) first: much of Bitwig's behavior there is known and measured.
+        Thanks for reporting. Agent Bridge for Bitwig is a hobby project, maintained on a best-effort basis.
+        Please check the [Limitations](https://github.com/zkyron-de/agent-bridge-for-bitwig/blob/main/docs/limitations.md) and [Troubleshooting](https://github.com/zkyron-de/agent-bridge-for-bitwig/blob/main/docs/troubleshooting.md) first: much of Bitwig's behavior there is known and measured.
         Do not paste your `data/bridge-token` or other secrets.
   - type: input
     id: bitwig
@@ -48,7 +48,7 @@ body:
     id: request
     attributes:
       label: Tool input
-      description: The arguments the agent sent. The entry in logs/bitwig-agent-bridge.jsonl has them.
+      description: The arguments the agent sent. The entry in logs/agent-bridge-for-bitwig.jsonl has them.
       render: json
   - type: textarea
     id: reply

@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Bitwig Agent Bridge logo">
-  <title>Bitwig Agent Bridge</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Agent Bridge for Bitwig logo">
+  <title>Agent Bridge for Bitwig</title>
   <defs>
     <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#FFA54A"/><stop offset="0.55" stop-color="#FF8713"/><stop offset="1" stop-color="#FF5705"/>

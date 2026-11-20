@@ -1,13 +1,13 @@
 loadAPI(25);
 
-host.defineController("Bitwig Agent Bridge", "Bitwig Agent Bridge", "2.0.0", "8A319A60-5BAF-4C0D-B613-16D646B1E8A6", "_zkyron, based on Bitwig Control Deck by Remy Mazmanian");
+host.defineController("Agent Bridge for Bitwig", "Agent Bridge for Bitwig", "2.0.0", "8A319A60-5BAF-4C0D-B613-16D646B1E8A6", "_zkyron, based on Bitwig Control Deck by Remy Mazmanian");
 // No MIDI: all control data uses an authenticated local UDP channel that never
 // leaves this Mac. Without MIDI ports there is nothing for Bitwig to auto-detect,
 // so the controller is added once by hand in Settings → Controllers.
 host.defineMidiPorts(0, 0);
 
 var BRIDGE_VERSION = "2.0.0";
-var BRIDGE_PROTOCOL = "bitwig-agent-bridge/1";
+var BRIDGE_PROTOCOL = "agent-bridge-for-bitwig/1";
 var BRIDGE_PORT = 50701;
 // Stamped with a per-install secret by `npm run setup`. The bridge refuses to
 // start while the placeholder is still in place.
@@ -175,7 +175,7 @@ function later(delay, callback) {
       try {
          callback();
       } catch (error) {
-         host.errorln("Bitwig Agent Bridge step error: " + error);
+         host.errorln("Agent Bridge for Bitwig step error: " + error);
          if (owner && !owner.done) finish(owner, false, { message: String(error.message || error) });
       }
    }, delay);
@@ -503,7 +503,7 @@ function requireChannel(params, allowDuplicateName) {
    if (!allowDuplicateName) {
       var sameName = trackIndicesNamed(currentName, bank, limit);
       if (sameName.length > 1) {
-         throw new Error(label + "s " + sameName.join(", ") + " are all named ‘" + currentName + "’, so Bitwig Agent Bridge cannot be sure which one is meant. " +
+         throw new Error(label + "s " + sameName.join(", ") + " are all named ‘" + currentName + "’, so Agent Bridge for Bitwig cannot be sure which one is meant. " +
             "Rename them with bitwig_set_track so each name is unique, then try again.");
       }
    }
@@ -676,10 +676,10 @@ function isAuthorized(request) {
 function noteAuthFailure() {
    authFailureCount += 1;
    if (authFailureCount === 1) {
-      host.showPopupNotification("Bitwig Agent Bridge ignored a request with the wrong auth token. Run `npm run setup` to reinstall the controller script.");
+      host.showPopupNotification("Agent Bridge for Bitwig ignored a request with the wrong auth token. Run `npm run setup` to reinstall the controller script.");
    }
    if (authFailureCount === 1 || authFailureCount % 100 === 0) {
-      host.errorln("Bitwig Agent Bridge ignored " + authFailureCount + " request(s) with the wrong auth token.");
+      host.errorln("Agent Bridge for Bitwig ignored " + authFailureCount + " request(s) with the wrong auth token.");
    }
 }
 
@@ -699,7 +699,7 @@ function respond(replyPort, id, ok, payload, method) {
    var what = method ? "the " + method + " reply" : "the reply";
    var bytes = encodeReply(id, ok, payload);
    if (bytes.length > MAX_REPLY_BYTES) {
-      host.errorln("Bitwig Agent Bridge: " + what + " is " + bytes.length + " bytes, over the " + MAX_REPLY_BYTES + "-byte limit.");
+      host.errorln("Agent Bridge for Bitwig: " + what + " is " + bytes.length + " bytes, over the " + MAX_REPLY_BYTES + "-byte limit.");
       bytes = encodeReply(id, false, {
          message: "Bitwig's answer is " + bytes.length + " bytes, over the " + MAX_REPLY_BYTES + "-byte limit for one reply. Ask for less, for example with a smaller limit, an offset or a query.",
          replyBytes: bytes.length,
@@ -709,14 +709,14 @@ function respond(replyPort, id, ok, payload, method) {
    try {
       host.sendDatagramPacket("127.0.0.1", Number(replyPort), bytes);
    } catch (error) {
-      host.errorln("Bitwig Agent Bridge could not send " + what + " (" + bytes.length + " bytes): " + error);
+      host.errorln("Agent Bridge for Bitwig could not send " + what + " (" + bytes.length + " bytes): " + error);
       try {
          host.sendDatagramPacket("127.0.0.1", Number(replyPort), encodeReply(id, false, {
             message: "Bitwig could not send " + what + " (" + bytes.length + " bytes): " + String(error.message || error),
             replyBytes: bytes.length
          }));
       } catch (secondError) {
-         host.errorln("Bitwig Agent Bridge could not send the error reply either: " + secondError);
+         host.errorln("Agent Bridge for Bitwig could not send the error reply either: " + secondError);
       }
    }
 }
@@ -729,7 +729,7 @@ function finish(request, ok, payload) {
       try {
          request.cleanup();
       } catch (error) {
-         host.errorln("Bitwig Agent Bridge cleanup error: " + error);
+         host.errorln("Agent Bridge for Bitwig cleanup error: " + error);
       }
    }
    request.done = true;
@@ -766,7 +766,7 @@ function processNextRequest() {
 
 function enqueue(source, id, method, params, timeoutMs) {
    if (requestQueue.length >= 32) {
-      respond(source, id, false, { message: "Bitwig Agent Bridge is busy. Try the request again." });
+      respond(source, id, false, { message: "Agent Bridge for Bitwig is busy. Try the request again." });
       return;
    }
    var clientTimeout = Number(timeoutMs);
@@ -1049,7 +1049,7 @@ function awaitInsertedDevice(request, beforeNames, expectedIndex, check, onDone)
 
 function requireRoomForDevice() {
    if (deviceBank.itemCount().get() >= MAX_DEVICES) {
-      throw new Error("The track already has " + deviceBank.itemCount().get() + " devices, and Bitwig Agent Bridge can reach only " + MAX_DEVICES + ". Nothing was inserted.");
+      throw new Error("The track already has " + deviceBank.itemCount().get() + " devices, and Agent Bridge for Bitwig can reach only " + MAX_DEVICES + ". Nothing was inserted.");
    }
 }
 
@@ -1963,7 +1963,7 @@ function handleCreateTrack(request) {
    var before = bankNames(bank, limit, channelKey);
    if (bank.itemCount().get() >= limit) {
       throw new Error("The project already has " + bank.itemCount().get() + " " + (effect ? "effect" : "main") +
-         " tracks, and Bitwig Agent Bridge can reach only the first " + limit + ". No track was created.");
+         " tracks, and Agent Bridge for Bitwig can reach only the first " + limit + ". No track was created.");
    }
    if (params.kind === "instrument") application.createInstrumentTrack(-1);
    else if (params.kind === "audio") application.createAudioTrack(-1);
@@ -3887,7 +3887,7 @@ function handleInvokeAction(request) {
    }
 
    var actionId = String(params.actionId);
-   if (BLOCKED_ACTIONS[actionId]) throw new Error("Bitwig Agent Bridge does not invoke ‘" + actionId + "’: it " + BLOCKED_ACTIONS[actionId] + ". Do this in Bitwig yourself.");
+   if (BLOCKED_ACTIONS[actionId]) throw new Error("Agent Bridge for Bitwig does not invoke ‘" + actionId + "’: it " + BLOCKED_ACTIONS[actionId] + ". Do this in Bitwig yourself.");
    var action = application.getAction(actionId);
    if (!action) throw new Error("Bitwig has no action with the id ‘" + actionId + "’. Ids are case-sensitive; find them with bitwig_actions.");
    action.invoke();
@@ -3909,7 +3909,7 @@ function dispatch(request) {
       case "status":
          finish(request, true, {
             connected: true,
-            bridge: "Bitwig Agent Bridge",
+            bridge: "Agent Bridge for Bitwig",
             version: BRIDGE_VERSION,
             apiVersion: 25,
             hostApiVersion: host.getHostApiVersion(),
@@ -4001,7 +4001,7 @@ function dispatch(request) {
          handleSetDeviceParameters(request);
          return;
       default:
-         throw new Error("Unknown Bitwig Agent Bridge method: " + request.method);
+         throw new Error("Unknown Agent Bridge for Bitwig method: " + request.method);
    }
 }
 
@@ -4196,7 +4196,7 @@ function init() {
       directValues = {};
       directDisplays = {};
       // Display strings are opt-in in Bitwig's Controller API. Observing the
-      // current device's IDs lets Bitwig Agent Bridge verify enumerated routing parameters
+      // current device's IDs lets Agent Bridge for Bitwig verify enumerated routing parameters
       // (for example a HW Instrument MIDI output) by their visible names.
       directDisplayObserver.setObservedParameterIds(directIds);
    });
@@ -4234,19 +4234,19 @@ function init() {
    for (var r = 0; r < BROWSER_PAGE; r++) markBrowserItem(resultBank.getItemAt(r));
 
    if (BRIDGE_TOKEN === "__BRIDGE" + "_TOKEN__") {
-      host.showPopupNotification("Bitwig Agent Bridge has no auth token. Run `npm run setup` and reinstall the controller script.");
-      host.errorln("Bitwig Agent Bridge refused to start: the auth token placeholder was never stamped. Run `npm run setup` in the project folder.");
+      host.showPopupNotification("Agent Bridge for Bitwig has no auth token. Run `npm run setup` and reinstall the controller script.");
+      host.errorln("Agent Bridge for Bitwig refused to start: the auth token placeholder was never stamped. Run `npm run setup` in the project folder.");
       return;
    }
 
-   var datagramBound = host.addDatagramPacketObserver("Bitwig Agent Bridge", BRIDGE_PORT, function(data) {
+   var datagramBound = host.addDatagramPacketObserver("Agent Bridge for Bitwig", BRIDGE_PORT, function(data) {
       var request = null;
       try {
          request = JSON.parse(decodeUtf8(data));
          var replyPort = Number(request.replyPort);
          if (!request || request.protocol !== BRIDGE_PROTOCOL || !request.id || !request.method ||
              !isFinite(replyPort) || replyPort < 1024 || replyPort > 65535) {
-            throw new Error("Malformed Bitwig Agent Bridge packet");
+            throw new Error("Malformed Agent Bridge for Bitwig packet");
          }
          if (!isAuthorized(request)) {
             noteAuthFailure();
@@ -4254,19 +4254,19 @@ function init() {
          }
          enqueue(replyPort, String(request.id), String(request.method), request.params || {}, request.timeoutMs);
       } catch (error) {
-         host.println("Bitwig Agent Bridge request error: " + error);
+         host.println("Agent Bridge for Bitwig request error: " + error);
          if (isAuthorized(request) && request.id && request.replyPort) {
-            respond(request.replyPort, request.id, false, { message: "Invalid Bitwig Agent Bridge request: " + error });
+            respond(request.replyPort, request.id, false, { message: "Invalid Agent Bridge for Bitwig request: " + error });
          }
       }
    });
-   if (!datagramBound) throw new Error("Bitwig Agent Bridge could not bind UDP port " + BRIDGE_PORT);
-   host.showPopupNotification("Bitwig Agent Bridge online");
-   host.println("Bitwig Agent Bridge " + BRIDGE_VERSION + " listening on UDP " + BRIDGE_PORT);
+   if (!datagramBound) throw new Error("Agent Bridge for Bitwig could not bind UDP port " + BRIDGE_PORT);
+   host.showPopupNotification("Agent Bridge for Bitwig online");
+   host.println("Agent Bridge for Bitwig " + BRIDGE_VERSION + " listening on UDP " + BRIDGE_PORT);
 }
 
 function flush() {}
 
 function exit() {
-   host.println("Bitwig Agent Bridge offline");
+   host.println("Agent Bridge for Bitwig offline");
 }

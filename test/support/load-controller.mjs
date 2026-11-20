@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
-const SOURCE = readFileSync(new URL("../../controller/BitwigAgentBridge.control.js", import.meta.url), "utf8");
+const SOURCE = readFileSync(new URL("../../controller/AgentBridgeForBitwig.control.js", import.meta.url), "utf8");
 
 // Loads the controller script against a fake Bitwig host with a manual clock,
 // so request handling can be tested without Bitwig running. Tests replace the

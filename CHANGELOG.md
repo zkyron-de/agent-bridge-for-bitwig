@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [2.0.0] - 2026-11-20
 
-Bitwig Agent Bridge 2.0.0 is the first release under the new name. Tools, their names and their fields changed incompatibly from Bitwig Control Deck 1.x.
+Agent Bridge for Bitwig 2.0.0 is the first release under the new name. Tools, their names and their fields changed incompatibly from Bitwig Control Deck 1.x.
 
 ### Added
 
@@ -42,6 +42,7 @@ Bitwig Agent Bridge 2.0.0 is the first release under the new name. Tools, their 
 
 ### Changed
 
+- Renamed to **Agent Bridge for Bitwig** (repository `agent-bridge-for-bitwig`), so the name no longer starts with Bitwig's trademark. In Bitwig, vendor and controller are both called Agent Bridge for Bitwig. The controller file is now `AgentBridgeForBitwig.control.js`, installed to `Controller Scripts/Agent Bridge for Bitwig/`; setup removes a copy installed under the old name. The environment variables are now `AGENT_BRIDGE_FOR_BITWIG_TOKEN`, `_HOST` and `_PORT`, the request log is `logs/agent-bridge-for-bitwig.jsonl`, and the wire protocol is `agent-bridge-for-bitwig/1`.
 - `docs/tools.md` gets an Inputs table for every tool, generated from the schemas (`npm run docs`); a test fails when it is out of date. `docs/limitations.md` lists every reach and size limit, `docs/development.md` the environment variables.
 - Version 2.0.0; `package.json` names _zkyron as author, Remy Mazmanian as contributor for Bitwig Control Deck, and the repository.
 - The README is now a short entry page with a quick start and a tool overview. Details moved to `docs/`: setup (all agents, uninstall), tool reference, limitations, troubleshooting and development. HELP.md is gone; its content lives in those pages.
@@ -173,8 +174,8 @@ First release of Bitwig Control Deck, a local MCP bridge that lets an AI agent c
 - Local dashboard at `http://127.0.0.1:50703` showing bridge health, the current session, loaded devices and a searchable inventory of installed VST3, VST2, Audio Unit and CLAP plug-ins. Its Connect page has copy-paste setup guides for Claude Code, Codex, Cursor, VS Code, Gemini CLI, local LLM setups and other MCP clients.
 - Local operation: the status service and dashboard listen on this Mac only, and every request to the Bitwig bridge must carry a secret generated for your install.
 
-[Unreleased]: https://github.com/zkyron-de/bitwig-agent-bridge/compare/v2.0.0...HEAD
-[2.0.0]: https://github.com/zkyron-de/bitwig-agent-bridge/releases/tag/v2.0.0
+[Unreleased]: https://github.com/zkyron-de/agent-bridge-for-bitwig/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/zkyron-de/agent-bridge-for-bitwig/releases/tag/v2.0.0
 [1.2.1]: https://github.com/remymazmanian/bitwig-control-deck/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/remymazmanian/bitwig-control-deck/releases/tag/v1.2.0
 [1.1.0]: https://github.com/remymazmanian/bitwig-control-deck/releases/tag/v1.1.0

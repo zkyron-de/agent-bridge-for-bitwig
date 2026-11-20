@@ -1,4 +1,4 @@
-// The MCP tools of Bitwig Agent Bridge: their names, descriptions and strict
+// The MCP tools of Agent Bridge for Bitwig: their names, descriptions and strict
 // input schemas, and the controller method each one calls. Kept apart from
 // the stdio server so tests can inspect the registry without starting it.
 import { z } from "zod";
@@ -40,7 +40,7 @@ const noteRef = z.strictObject({ beat: noteFields.beat, pitch: noteFields.pitch,
 
 export function registerTools(server, call) {
   server.registerTool("bitwig_status", {
-    description: "Check Bitwig Agent Bridge, Bitwig, the current project, transport, current selection, and whether Bitwig's audio engine is on.",
+    description: "Check the bridge, Bitwig, the current project, transport, current selection, and whether Bitwig's audio engine is on.",
     inputSchema: z.strictObject({})
   }, async () => call("status"));
 
