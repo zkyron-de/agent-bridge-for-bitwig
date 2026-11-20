@@ -26,6 +26,10 @@ Tell an agent what to change in Bitwig Studio. Bitwig Agent Bridge does it on yo
 
 Bitwig Agent Bridge is a local [MCP](https://modelcontextprotocol.io) server for Bitwig Studio 6 on macOS. It gives an agent such as Claude Code exact, read-back-verified control of tracks, the mixer, devices and plug-in parameters, launcher clips and notes, scenes, the transport and Bitwig's own actions, so it can compose, arrange and mix.
 
+<p align="center">
+  <img src="assets/demo.png" alt="Claude Code asked to write a bassline; Bitwig Studio shows the new Bass track with Polymer and the verified four-bar clip" width="100%">
+</p>
+
 ## Why
 
 - **Exact targets.** Tracks are addressed by Bitwig's track id, which survives renaming and moving. Devices, scenes and clips are addressed by index plus their exact current name, so a stale target is refused instead of changing the wrong thing.
