@@ -4,6 +4,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-20
+
 ### Added
 
 - Windows and Linux support, tested with Bitwig 6.1.7 on Windows 11 and, as Flatpak, on Kubuntu. Setup finds Bitwig's user folder on each system and takes `--controller-dir` for a moved controller-script folder.
@@ -184,7 +186,8 @@ First release of Bitwig Control Deck, a local MCP bridge that lets an AI agent c
 - Local dashboard at `http://127.0.0.1:50703` showing bridge health, the current session, loaded devices and a searchable inventory of installed VST3, VST2, Audio Unit and CLAP plug-ins. Its Connect page has copy-paste setup guides for Claude Code, Codex, Cursor, VS Code, Gemini CLI, local LLM setups and other MCP clients.
 - Local operation: the status service and dashboard listen on this Mac only, and every request to the Bitwig bridge must carry a secret generated for your install.
 
-[Unreleased]: https://github.com/zkyron-de/agent-bridge-for-bitwig/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/zkyron-de/agent-bridge-for-bitwig/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/zkyron-de/agent-bridge-for-bitwig/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/zkyron-de/agent-bridge-for-bitwig/releases/tag/v2.0.0
 [1.2.1]: https://github.com/remymazmanian/bitwig-control-deck/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/remymazmanian/bitwig-control-deck/releases/tag/v1.2.0
