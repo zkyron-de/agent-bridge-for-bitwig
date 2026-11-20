@@ -14,7 +14,7 @@ import { join } from "node:path";
 
 const DEFAULT_DOCS = "/Applications/Bitwig Studio.app/Contents/Resources/Documentation/control-surface/api";
 const docs = process.env.BITWIG_API_DOCS || DEFAULT_DOCS;
-const controllerPath = process.env.BITWIG_CONTROLLER || new URL("../controller/BitwigAgentBridge.control.js", import.meta.url);
+const controllerPath = process.env.BITWIG_CONTROLLER || new URL("../controller/AgentBridgeForBitwig.control.js", import.meta.url);
 
 // Method names that are plain JavaScript or Java, not Bitwig API.
 const LANGUAGE_METHODS = new Set([

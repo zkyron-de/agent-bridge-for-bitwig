@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.svg">
-    <img src="assets/banner-light.svg" alt="Bitwig Agent Bridge: let AI agents compose, arrange and mix in Bitwig Studio" width="100%">
+    <img src="assets/banner-light.svg" alt="Agent Bridge for Bitwig: let AI agents compose, arrange and mix in Bitwig Studio" width="100%">
   </picture>
 </p>
 
@@ -21,9 +21,9 @@
   <a href="#documentation">Docs</a>
 </p>
 
-Tell an agent what to change in Bitwig Studio. Bitwig Agent Bridge does it on your Mac, then checks that Bitwig actually did it.
+Tell an agent what to change in Bitwig Studio. Agent Bridge for Bitwig does it on your Mac, then checks that Bitwig actually did it.
 
-Bitwig Agent Bridge is a local [MCP](https://modelcontextprotocol.io) server for Bitwig Studio 6 on macOS. It gives an agent such as Claude Code exact, read-back-verified control of tracks, the mixer, devices and plug-in parameters, launcher clips and notes, scenes, the transport and Bitwig's own actions, so it can compose, arrange and mix.
+Agent Bridge for Bitwig is a local [MCP](https://modelcontextprotocol.io) server for Bitwig Studio 6 on macOS. It gives an agent such as Claude Code exact, read-back-verified control of tracks, the mixer, devices and plug-in parameters, launcher clips and notes, scenes, the transport and Bitwig's own actions, so it can compose, arrange and mix.
 
 <p align="center">
   <img src="assets/demo.png" alt="Claude Code asked to write a bassline; Bitwig Studio shows the new Bass track with Polymer and the verified four-bar clip" width="100%">
@@ -43,11 +43,11 @@ Bitwig Agent Bridge is a local [MCP](https://modelcontextprotocol.io) server for
 You need macOS 13 or newer, Bitwig Studio 6 (tested with 6.1.7) and Node.js 20 or newer.
 
 1. **Install.** In the checkout, run `npm run setup`. It installs the dependencies, creates a private secret and installs the controller script into Bitwig's controller folder.
-2. **Add the controller in Bitwig, once.** **Settings → Controllers → + Add Controller**, vendor **Bitwig Agent Bridge**, controller of the same name. Bitwig shows "Bitwig Agent Bridge online".
+2. **Add the controller in Bitwig, once.** **Settings → Controllers → + Add Controller**, vendor **Agent Bridge for Bitwig**, controller of the same name. Bitwig shows "Agent Bridge for Bitwig online".
 3. **Register the server with Claude Code**, with the absolute path of your checkout:
 
    ```sh
-   claude mcp add --scope user bitwig -- node /path/to/bitwig-agent-bridge/src/index.mjs
+   claude mcp add --scope user bitwig -- node /path/to/agent-bridge-for-bitwig/src/index.mjs
    ```
 
 4. **Try it.** With Bitwig open, ask Claude Code: "Call bitwig_status and list the tracks."
@@ -107,8 +107,8 @@ The agent picks the tools. Every change comes back with what Bitwig reports, so 
 
 ## Support
 
-Bitwig Agent Bridge is a hobby project, maintained on a best-effort basis. Found a bug or missing something? [Open an issue](https://github.com/zkyron-de/bitwig-agent-bridge/issues/new/choose) with the form; it asks for the Bitwig version and display language, which matter for many reports.
+Agent Bridge for Bitwig is a hobby project, maintained on a best-effort basis. Found a bug or missing something? [Open an issue](https://github.com/zkyron-de/agent-bridge-for-bitwig/issues/new/choose) with the form; it asks for the Bitwig version and display language, which matter for many reports.
 
 ## Origin and license
 
-Bitwig Agent Bridge is based on [Bitwig Control Deck](https://github.com/remymazmanian/bitwig-control-deck) by Remy Mazmanian, released under the MIT License. The original copyright notice is kept in [LICENSE](LICENSE).
+Agent Bridge for Bitwig is based on [Bitwig Control Deck](https://github.com/remymazmanian/bitwig-control-deck) by Remy Mazmanian, released under the MIT License. The original copyright notice is kept in [LICENSE](LICENSE).

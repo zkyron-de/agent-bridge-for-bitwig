@@ -10,7 +10,7 @@ const tools = [];
 registerTools({ registerTool: (name, config, handler) => tools.push({ name, config, handler }) }, (method, params) => ({ method, params }));
 for (const tool of tools) tool.method = (await tool.handler({})).method;
 
-const controller = readFileSync(new URL("../controller/BitwigAgentBridge.control.js", import.meta.url), "utf8");
+const controller = readFileSync(new URL("../controller/AgentBridgeForBitwig.control.js", import.meta.url), "utf8");
 const dispatchBody = controller.slice(controller.indexOf("function dispatch(request) {"));
 const dispatched = [...dispatchBody.slice(0, dispatchBody.indexOf("\n}\n")).matchAll(/case "([a-z_]+)":/g)].map(m => m[1]);
 const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");

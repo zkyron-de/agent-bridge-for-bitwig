@@ -36,6 +36,6 @@ for (const method of ["audio_engine", "restart_bridge", "selection_state", "list
     context.enqueue(5000, "1", method, { action: "deactivate" }, 5000);
     advance(100);
     assert.equal(responses[0].ok, false);
-    assert.match(responses[0].payload.message, /Unknown Bitwig Agent Bridge method/);
+    assert.match(responses[0].payload.message, /Unknown Agent Bridge for Bitwig method/);
   });
 }

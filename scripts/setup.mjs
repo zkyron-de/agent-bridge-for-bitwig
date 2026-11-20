@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Local setup for Bitwig Agent Bridge. Safe to re-run at any time.
+// Local setup for Agent Bridge for Bitwig. Safe to re-run at any time.
 //
 //   npm run setup                       install deps, create the secret,
 //                                       install the controller script
@@ -9,7 +9,7 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,9 +18,13 @@ const root = path.dirname(fileURLToPath(new URL("../package.json", import.meta.u
 const args = new Set(process.argv.slice(2));
 
 const tokenFile = path.join(root, "data", "bridge-token");
-const controllerSource = path.join(root, "controller", "BitwigAgentBridge.control.js");
-const controllerTargetDirectory = path.join(homedir(), "Documents", "Bitwig Studio", "Controller Scripts", "Bitwig Agent Bridge");
-const controllerTarget = path.join(controllerTargetDirectory, "BitwigAgentBridge.control.js");
+const controllerSource = path.join(root, "controller", "AgentBridgeForBitwig.control.js");
+const controllerTargetDirectory = path.join(homedir(), "Documents", "Bitwig Studio", "Controller Scripts", "Agent Bridge for Bitwig");
+const controllerTarget = path.join(controllerTargetDirectory, "AgentBridgeForBitwig.control.js");
+// Before 2.0.0 the project was called Bitwig Agent Bridge and installed here.
+// Both copies share one controller id, so the old one has to go.
+const legacyDirectory = path.join(homedir(), "Documents", "Bitwig Studio", "Controller Scripts", "Bitwig Agent Bridge");
+const legacyController = path.join(legacyDirectory, "BitwigAgentBridge.control.js");
 
 let failures = 0;
 
@@ -28,7 +32,7 @@ function ok(message) { console.log(`  ✓ ${message}`); }
 function fail(message) { failures += 1; console.log(`  ✗ ${message}`); }
 function heading(message) { console.log(`\n${message}`); }
 
-heading("Bitwig Agent Bridge setup");
+heading("Agent Bridge for Bitwig setup");
 console.log(`  Install location: ${root}`);
 
 const nodeMajor = Number(process.versions.node.split(".")[0]);
@@ -66,11 +70,17 @@ if (!args.has("--skip-controller")) {
   const source = await readFile(controllerSource, "utf8");
   const placeholder = "__BRIDGE_TOKEN__";
   if (!source.includes(placeholder)) {
-    fail(`controller/BitwigAgentBridge.control.js is missing the token placeholder ${placeholder}.`);
+    fail(`controller/AgentBridgeForBitwig.control.js is missing the token placeholder ${placeholder}.`);
   } else {
     await mkdir(controllerTargetDirectory, { recursive: true });
     await writeFile(controllerTarget, source.replace(placeholder, token), { mode: 0o600 });
     ok(`Installed to ${controllerTarget}`);
+  }
+  if (existsSync(legacyController)) {
+    await rm(legacyController);
+    const left = await readdir(legacyDirectory);
+    if (left.length === 0) await rm(legacyDirectory, { recursive: true });
+    ok(`Removed the copy installed under the old name (${legacyController})`);
   }
 }
 
@@ -83,8 +93,8 @@ if (failures > 0) {
 heading("Setup complete. Next steps:");
 console.log(`
   1. In Bitwig: Settings → Controllers → + Add Controller → vendor and
-     controller "Bitwig Agent Bridge". (Already added? Toggle its power button
-     off and on so Bitwig reloads the script.)
+     controller "Agent Bridge for Bitwig". (Already added? Toggle its power
+     button off and on so Bitwig reloads the script.)
   2. Register the MCP server with your agent, for example Claude Code:
      claude mcp add bitwig -- node ${path.join(root, "src", "index.mjs")}
 `);
