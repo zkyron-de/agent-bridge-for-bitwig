@@ -38,6 +38,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- The README is now a short entry page with a quick start and a tool overview. Details moved to `docs/`: setup (all agents, uninstall), tool reference, limitations, troubleshooting and development. HELP.md is gone; its content lives in those pages.
 - Issue forms for bug reports and feature requests (blank issues are off), and a Support section in the README.
 - New logo, a light and a dark README banner and a social preview image in `assets/`; the README gets badges, quick links and example requests.
 - The README now holds the Claude Code setup, the complete tool reference and a Limitations section with everything measured in Bitwig 6.1.7; HELP.md keeps the other agents, troubleshooting and uninstalling.
