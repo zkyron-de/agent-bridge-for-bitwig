@@ -8,18 +8,15 @@ Everything about installing, using, troubleshooting, and understanding Bitwig Co
 
 1. [What Control Deck is](#what-control-deck-is)
 2. [Compatibility](#compatibility)
-3. [The pieces, in plain language](#the-pieces-in-plain-language)
+3. [The pieces](#the-pieces)
 4. [Installing](#installing)
 5. [Setting up Bitwig](#setting-up-bitwig)
-6. [Everyday use](#everyday-use)
-7. [The dashboard](#the-dashboard)
-8. [Connecting SI agents](#connecting-si-agents)
-9. [MCP tool reference](#mcp-tool-reference)
-10. [Files and locations](#files-and-locations)
-11. [Troubleshooting](#troubleshooting)
-12. [Uninstalling](#uninstalling)
-13. [Security model](#security-model)
-14. [FAQ](#faq)
+6. [Connecting SI agents](#connecting-si-agents)
+7. [MCP tool reference](#mcp-tool-reference)
+8. [Files and locations](#files-and-locations)
+9. [Troubleshooting](#troubleshooting)
+10. [Uninstalling](#uninstalling)
+11. [Security model](#security-model)
 
 ---
 
@@ -27,88 +24,43 @@ Everything about installing, using, troubleshooting, and understanding Bitwig Co
 
 Bitwig Control Deck lets an SI agent operate Bitwig Studio the way a careful engineer would: every action names its exact target, ambiguous requests are refused, and every change is read back from Bitwig before being reported as done. It speaks the [Model Context Protocol](https://modelcontextprotocol.io) (MCP), an open standard for connecting agents to tools.
 
-It works with Claude Desktop, Claude Code, Cursor, OpenAI Codex, Grok CLI, Windsurf, Cline, and GitHub Copilot in VS Code. It works with any MCP-compatible agent that can run a local server. That includes fully local LLM setups.
-
-It is not a remote-control surface, a preset manager, or a cloud service. It is a precision bridge between an agent's intent and Bitwig's controller API, plus a local dashboard for watching what's happening.
-
 ## Compatibility
-
-**Supported today: macOS only.**
 
 | Requirement | Minimum |
 |---|---|
 | macOS | 13 Ventura or newer (Apple silicon and Intel) |
 | Bitwig Studio | 6.x (Controller API 18) |
 | Node.js | 20 or newer |
-| Xcode Command Line Tools | optional — only for the MIDI auto-detect helper and the wrapper app |
 
-The macOS-specific parts are the service autostart (launchd), the MIDI auto-detect helper (CoreMIDI), the wrapper app (WebKit), and the plug-in scanner's folder paths. The core — the controller script, the MCP server, the UDP protocol, and the dashboard — is platform-neutral, because Bitwig's controller API and Node.js both run everywhere. **Linux and Windows are not supported yet**, but the port is well understood and modestly sized; see [PORTING.md](PORTING.md) if you'd like to help.
+Only the controller-script install path in `scripts/setup.mjs` and the plug-in scanner's folder paths are macOS-specific.
 
-## The pieces, in plain language
-
-Control Deck is one folder containing five cooperating parts:
+## The pieces
 
 1. **The controller script** (`controller/ControlDeck.control.js`) — a Bitwig controller extension that runs *inside* Bitwig. It listens on local UDP port `50701` for authenticated requests and is the only thing that actually touches your project. Installed into Bitwig by setup with your private secret stamped in.
-2. **The MCP server** (`src/index.mjs`) — the part your SI agent talks to. Each agent launches its own copy on demand (stdio; it is not a background service) and it relays requests to the controller script.
-3. **The status API** (`src/dashboard-server.mjs`) — a small read-only web service on `127.0.0.1:50702` that reports bridge health, session state, and the plug-in inventory. Runs at login.
-4. **The dashboard** (`dashboard/`) — the Control Deck web UI on `127.0.0.1:50703`. Runs at login.
-5. **The MIDI helper** (`bin/control-deck-midi-ports`) — optional. Publishes a virtual MIDI identity so Bitwig auto-detects the controller. Without it, you add the controller manually once and nothing else changes.
-
-The optional **wrapper app** (`Bitwig Control Deck.app`) is a native window showing the dashboard — pure convenience; a browser tab is equivalent.
+2. **The MCP server** (`src/index.mjs`) — the part your SI agent talks to. Each agent launches its own copy on demand over stdio (it is not a background service) and it relays requests to the controller script.
 
 ## Installing
 
-Two equivalent paths; both are safe to re-run at any time.
-
-**No coding required:** follow the five-step Quickstart in the [README](README.md#quickstart-no-coding-required) — install Node.js, download and move the folder somewhere permanent, right-click **Install Control Deck.command** → Open, enable the controller in Bitwig, connect your agent.
-
-**Developers:** `npm run setup` runs the same engine: dependency installs, native and dashboard builds, secret generation, controller install, and launchd agents (written and activated). Flags: `--skip-build`, `--skip-controller`, `--skip-agents`. Granular scripts remain (`build:midi-ports`, `build:macos`, `index:plugins`, dashboard `dev`/`build`/`check`).
-
-Setup guards the common traps: it refuses to run from Downloads/Desktop (services would break when you move the folder), detects a moved checkout and refreshes everything, and ends failed runs with what to fix.
+Run `npm run setup` in the checkout. It installs the MCP server's dependencies, generates the per-install secret, and installs the controller script with the secret stamped in. Flags: `--skip-install`, `--skip-controller`. It is safe to re-run at any time.
 
 ## Setting up Bitwig
 
-Setup installs the controller script into Bitwig's default controller-script folder (`~/Documents/Bitwig Studio/Controller Scripts/Control Deck/`), so Bitwig can already see it. One of two things happens next:
-
-**Auto-detection (when the MIDI helper is running).** The helper publishes virtual MIDI ports named "Control Deck Bridge In/Out". The next time Bitwig starts (or rescans controllers), it recognizes that identity and adds **Control Deck Bridge** on its own — you'll see the "Control Deck Bridge online" popup inside Bitwig. Nothing to do.
-
-**Manual add (no helper, or auto-detect didn't fire).**
+Setup installs the controller script into Bitwig's default controller-script folder (`~/Documents/Bitwig Studio/Controller Scripts/Control Deck/`). Add it once:
 
 1. In Bitwig, open the Dashboard (the Bitwig logo, top center) → **Settings** → **Controllers**.
 2. Click **+ Add Controller**.
 3. Choose vendor **Control Deck**, then **Control Deck Bridge**, and click **Add**.
-4. If the "Control Deck Bridge In/Out" MIDI ports exist, assign them. If they don't, leave the ports unassigned — the bridge communicates over local UDP; the MIDI identity exists only for auto-detection and is not used for control data.
-5. The entry's power button should be on. You'll see the **"Control Deck Bridge online"** popup, and the script console (the `>` icon on the controller entry) logs `Control Deck Bridge <version> listening on UDP 50701`.
+4. The entry's power button should be on. You'll see the **"Control Deck Bridge online"** popup, and the script console (the `>` icon on the controller entry) logs `Control Deck Bridge <version> listening on UDP 50701`.
 
-**Verifying and reloading.** The dashboard's Deck page flips to "Bitwig is linked." the moment the bridge is up — that's the quickest end-to-end check. After re-running setup (which re-stamps the secret into the controller script), make Bitwig reload it: restart Bitwig, or toggle the controller's power button off and on in Settings → Controllers.
+**Reloading.** After re-running setup (which re-stamps the secret into the controller script), make Bitwig reload it: restart Bitwig, or toggle the controller's power button off and on in Settings → Controllers.
 
 **If the controller isn't listed at all**, Bitwig is probably looking in a non-default location: Settings → **Locations** → "My Controller Scripts" should point at `~/Documents/Bitwig Studio/Controller Scripts` (the default). If you've customized it, either restore the default or copy the `Control Deck` folder into your custom location — but always the setup-installed copy, never the repo file, which has no secret stamped in.
 
-## Everyday use
-
-Nothing to start manually. The services launch at login; the controller loads with Bitwig; agents launch the MCP server themselves.
-
-1. Open **Bitwig**. The bridge announces itself ("Control Deck Bridge online").
-2. Ask your agent — "list my tracks", "insert a Polymer on track 2 and set its cutoff to 0.6", "build an arrangement from my launcher clips".
-3. Optionally watch the **dashboard** (app or `http://127.0.0.1:50703`) to see status and devices live.
-
-Order never matters — every piece waits gracefully for the others.
-
-## The dashboard
-
-- **Deck** — bridge status, current project and transport, the selected track's device chain, and a searchable inventory of every VST3, VST2, AU, and CLAP plug-in on your machine (reindex from here after installing plug-ins).
-- **Connect** — copy-paste setup for every SI agent, rendered with your machine's real install path. See [Connecting SI agents](#connecting-si-agents).
-- **Settings** — bridge address, refresh cadence, plug-in library defaults, density, signal color, motion. Stored in your browser; the deck itself never writes to Bitwig.
-
 ## Connecting SI agents
-
-The **Connect page** (`http://127.0.0.1:50703/connect`) is the canonical guide, with exact snippets for Claude Desktop, Claude Code, Cursor, OpenAI Codex, Grok CLI, Windsurf, Cline, GitHub Copilot in VS Code, local LLM harnesses (LM Studio, Ollama via mcphost), and any other MCP client. The universal facts:
 
 - **Command:** `node <install-path>/src/index.mjs`
 - **Transport:** stdio — no URL, no port, no network setup
 - Bitwig must be open for tools to work; the agent config is one-time.
-
-Remote cloud connectors (claude.ai, ChatGPT) are deliberately unsupported — see the [FAQ](#faq).
 
 ### Setup snippets
 
@@ -237,82 +189,44 @@ All 35 tools follow the same contract: **exact targets** (mutations require both
 
 | What | Where |
 |---|---|
-| The install (never move without re-running setup) | wherever you placed the folder |
 | Per-install secret | `<install>/data/bridge-token` |
 | Plug-in inventory | `<install>/data/plugin-index.json` |
 | MCP request log | `<install>/logs/control-deck.jsonl` |
 | Controller script (installed copy) | `~/Documents/Bitwig Studio/Controller Scripts/Control Deck/` |
-| Launch agents | `~/Library/LaunchAgents/com.controldeck.{midi-ports,api,dashboard}.plist` |
-| Service logs | `/tmp/com.controldeck.*.log` and `.error.log` |
-| Wrapper app (optional) | built to `<install>/build/`, typically copied to `/Applications` |
 
-Ports (all loopback-only): `50701/udp` bridge, `50702/tcp` status API, `50703/tcp` dashboard.
+Port (loopback-only): `50701/udp` bridge.
 
 ## Troubleshooting
 
-**The deck says "waiting for Bitwig."** Bitwig isn't open, or the controller isn't active. In Bitwig: Settings → Controllers → confirm "Control Deck Bridge" exists and is enabled. If it's missing, add it manually (vendor "Control Deck") or run setup again and restart Bitwig.
+**Tools time out.** Bitwig isn't open, or the controller isn't active. In Bitwig: Settings → Controllers → confirm "Control Deck Bridge" exists and is enabled. `bitwig_status` is the cheapest way to check what the agent sees.
 
-**Requests time out even though Control Deck Bridge is enabled.** The controller script and your services may disagree about the secret, usually because the controller was installed before the current `data/bridge-token`. The bridge ignores requests with the wrong secret without replying, shows a popup in Bitwig the first time, and logs the count. Run setup again (it re-stamps the controller), then restart Bitwig.
+**Requests time out even though Control Deck Bridge is enabled.** The controller script and the MCP server may disagree about the secret, usually because the controller was installed before the current `data/bridge-token`. The bridge ignores requests with the wrong secret without replying, shows a popup in Bitwig the first time, and logs the count. Run setup again (it re-stamps the controller), then reload the controller in Bitwig.
 
 **The controller refuses to start and mentions a missing token.** The repo copy of the controller was installed by hand instead of through setup, so the secret placeholder was never stamped. Run setup; never copy `controller/ControlDeck.control.js` into Bitwig manually.
 
-**Dashboard won't load.** Check the services: `launchctl print gui/$(id -u)/com.controldeck.dashboard` (and `.api`). Logs live in `/tmp/com.controldeck.*.error.log`. `launchctl kickstart -k gui/$(id -u)/<label>` restarts one. Re-running setup fixes most states.
-
-**Everything broke after moving or renaming the folder.** Expected — services pin absolute paths. Run setup from the new location (it detects the move and refreshes), and re-register the MCP server in your agent since its path changed too.
-
 **A tool says several tracks "are all named" the same.** Bitwig's controller API version 18 gives tracks no permanent ID, so Control Deck finds a track by its position and checks its name. When two tracks share a name, that check can't catch a track that moved, so tools refuse them. `bitwig_tracks` lists the clashing names under `duplicateNames`. Give each track a unique name, in Bitwig or with `bitwig_rename_track`, which still works on duplicates and refuses a name another track already has.
-
-**Everything broke after upgrading Node.** The launch agents pin the Node binary that ran setup. Re-run setup with the new Node and they're re-pinned.
-
-**"MIDI helper skipped" during setup.** Apple's command line tools are missing. Run `xcode-select --install`, accept the popup, run setup again. Or skip it forever and add the controller in Bitwig manually — the helper is only for auto-detection.
 
 **Save to Library opened, but nothing was saved.** Bitwig's API can open the dialog but can't type into it, so `bitwig_save_device_preset` leaves the dialog open for you to name and save. With `confirm: true` it presses Enter to accept the prefilled name, and only when the same device is still selected. Compare `presetNameBefore` and `presetNameAfter` in the reply, then check the Library.
 
 **The selected track flickers while a tool runs.** Device, sample and clip tools work through Bitwig's selection, so they select their track for a moment. When the tool finishes, Control Deck selects your track again, and your device too when the tool worked on that same track. Selection is left alone when your track moved or was deleted, and when you had the master, an effect track or a track past the first 128 selected. `bitwig_create_track` still leaves the new track selected.
 
-**macOS refuses to open the installer.** Downloaded, non-notarized scripts need a one-time right-click → **Open**. Everything after that first launch is normal.
-
-**Plug-in list is empty or stale.** Use the reindex button on the deck, or `npm run index:plugins`.
+**Plug-in list is empty or stale.** Run `bitwig_refresh_plugin_index` or `npm run index:plugins`.
 
 **"Bitwig's answer is … bytes, over the 60000-byte limit for one reply."** Each answer from Bitwig travels in one local network message, capped at 60,000 bytes. Ask for less at once: a smaller `limit`, an `offset`, or a `query` filter.
 
 **"Bitwig could not send the … reply."** macOS refused the message from Bitwig, usually because it was larger than the system allows for one message. Ask for less at once, as above. The Controller Script Console shows the same error with the size.
 
-**An agent connects but tools time out.** Bitwig must be open with the controller enabled; requests need a live bridge. `bitwig_status` is the cheapest way to check what the agent sees.
-
 ## Uninstalling
 
 ```sh
-launchctl bootout gui/$(id -u)/com.controldeck.midi-ports
-launchctl bootout gui/$(id -u)/com.controldeck.api
-launchctl bootout gui/$(id -u)/com.controldeck.dashboard
-rm ~/Library/LaunchAgents/com.controldeck.*.plist
 rm -rf ~/Documents/"Bitwig Studio"/"Controller Scripts"/"Control Deck"
 ```
 
-Then delete the install folder, remove the wrapper app from `/Applications` if you copied it there, and remove the server from your agent (for Claude Code: `claude mcp remove bitwig`). Control Deck writes nowhere else.
+Then remove the controller in Bitwig's Settings → Controllers, delete the install folder, and remove the server from your agent (for Claude Code: `claude mcp remove bitwig`). Control Deck writes nowhere else.
 
 ## Security model
 
 - Everything binds to `127.0.0.1`. Nothing listens on, or connects to, any network.
 - Every bridge request carries a per-install secret generated on your machine and never committed anywhere. The controller refuses to run without one.
 - Mutations require exact index-plus-name targets and are refused on mismatch or ambiguity, so a confused agent fails loudly instead of editing the wrong thing.
-- The wrapper app blocks all navigation away from the local dashboard.
 - The MCP server logs requests locally to `logs/control-deck.jsonl` so you can audit what an agent did.
-
-## FAQ
-
-**Does it work with Claude Code / Codex / Cursor / my local LLM?**
-Yes. It works with Claude Desktop, Claude Code, Cursor, OpenAI Codex, Grok CLI, Windsurf, Cline, and GitHub Copilot in VS Code. It works with any MCP-compatible agent that can run a local server. See [Setup snippets](#setup-snippets), or the Connect page for snippets with your real install path. For local LLMs, the harness (LM Studio, mcphost, etc.) speaks MCP; any local model with solid tool-calling can drive Bitwig fully offline.
-
-**Can claude.ai or ChatGPT control it from the cloud via a connector?**
-Not out of the box, deliberately: connectors expect a public HTTPS endpoint, and Control Deck is loopback-only. It can be bridged with a stdio→HTTP gateway plus a tunnel, but that makes your DAW internet-reachable and the bridge secret does not protect the HTTP side — you'd need real endpoint auth, an always-awake Mac, and tolerance for cloud round-trip latency. If you need other-device access, a private overlay network (e.g. plain Tailscale) is the sane middle ground. Local agents over stdio are the supported path.
-
-**Does it load presets or use Bitwig's browser search?**
-No, by design. Only the Devices browsing session is used, so what gets inserted is always the exact named device — never a preset guess.
-
-**Does it phone home, collect telemetry, or need an account?**
-No, no, and no.
-
-**Linux? Windows?**
-Not yet — see [Compatibility](#compatibility) and [PORTING.md](PORTING.md). The core is portable; contributions welcome.

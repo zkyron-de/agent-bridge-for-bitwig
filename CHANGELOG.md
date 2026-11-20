@@ -4,6 +4,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Removed
+
+- The Next.js dashboard (`dashboard/`), its local status service (`src/dashboard-server.mjs`, `src/local-http.mjs`), the macOS WebKit wrapper (`macos/`), the CoreMIDI auto-detect helper (`native/`), the double-click installer, `PORTING.md`, and the launchd agents that started them. No MCP tool used any of them.
+- The controller script no longer declares MIDI ports or a discovery pair, so Bitwig no longer auto-adds it; add it once in Settings → Controllers.
+
+### Changed
+
+- `npm run setup` now only installs dependencies, creates the bridge secret, and installs the controller script. `--skip-build` and `--skip-agents` are gone; `--skip-install` skips `npm install`.
+
 ## [1.2.1] - 2026-10-28
 
 Fixes security advisories in the dashboard and MCP server dependencies, lists the agents Control Deck works with in the docs and on the Connect page, and clears the dashboard lint errors.

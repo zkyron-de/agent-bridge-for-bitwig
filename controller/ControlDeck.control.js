@@ -1,11 +1,10 @@
 loadAPI(18);
 
 host.defineController("Control Deck", "Control Deck Bridge", "1.2.1", "BC47EFA3-FFD7-4155-9AE6-164DB3E58E89");
-host.defineMidiPorts(1, 1);
-// Control Deck's native macOS helper publishes these private virtual endpoints. They
-// give Bitwig a device identity for auto-add; control data uses an authenticated
-// local UDP channel that never leaves this Mac.
-host.addDeviceNameBasedDiscoveryPair(["Control Deck Bridge In"], ["Control Deck Bridge Out"]);
+// No MIDI: all control data uses an authenticated local UDP channel that never
+// leaves this Mac. Without MIDI ports there is nothing for Bitwig to auto-detect,
+// so the controller is added once by hand in Settings → Controllers.
+host.defineMidiPorts(0, 0);
 
 var CONTROL_DECK_VERSION = "1.2.1";
 var CONTROL_DECK_PROTOCOL = "control-deck/1";
