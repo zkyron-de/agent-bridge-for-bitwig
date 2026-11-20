@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { registerTools } from "../src/tools.mjs";
+import { registeredTools, render } from "../scripts/tool-docs.mjs";
 
 // The tool registry as the MCP server sees it: name, config and the
 // controller method each handler calls.
@@ -13,7 +14,7 @@ const controller = readFileSync(new URL("../controller/BitwigAgentBridge.control
 const dispatchBody = controller.slice(controller.indexOf("function dispatch(request) {"));
 const dispatched = [...dispatchBody.slice(0, dispatchBody.indexOf("\n}\n")).matchAll(/case "([a-z_]+)":/g)].map(m => m[1]);
 const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-const reference = readme.slice(readme.indexOf("## Tool reference"), readme.indexOf("\n## ", readme.indexOf("## Tool reference") + 5));
+const reference = readFileSync(new URL("../docs/tools.md", import.meta.url), "utf8");
 
 test("there are at most 25 tools, each with a unique bitwig_ name and a description", () => {
   assert.ok(tools.length <= 25, `${tools.length} tools`);
@@ -51,8 +52,19 @@ test("every tool calls a method the controller dispatches, and every dispatched 
   assert.deepEqual(dispatched.filter(method => !called.has(method)), [], "dispatched methods without a tool");
 });
 
-test("the README tool reference documents exactly the registered tools", () => {
-  const documented = [...reference.matchAll(/^- \*\*(bitwig_[a-z_]+)\*\*/gm)].map(m => m[1]);
+test("docs/tools.md documents exactly the registered tools", () => {
+  const documented = [...reference.matchAll(/^### (bitwig_[a-z_]+)$/gm)].map(m => m[1]);
   assert.deepEqual([...documented].sort(), tools.map(t => t.name).sort());
+  assert.match(reference, new RegExp(`All ${tools.length} tools`));
+});
+
+test("the README tool overview lists exactly the registered tools and counts them right", () => {
+  const listed = [...readme.matchAll(/\[`(bitwig_[a-z_]+)`\]\(docs\/tools\.md#\1\)/g)].map(m => m[1]);
+  assert.deepEqual([...listed].sort(), tools.map(t => t.name).sort());
   assert.match(readme, new RegExp(`All ${tools.length} tools`));
+  assert.match(readme, new RegExp(`^${tools.length} tools, each`, "m"));
+});
+
+test("the Inputs tables in docs/tools.md match the schemas (run npm run docs)", () => {
+  assert.equal(render(reference, registeredTools()), reference);
 });

@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        The bridge can only do what Bitwig's Controller API offers. What it does not cover yet, and why, is listed under [Limitations](https://github.com/zkyron-de/bitwig-agent-bridge/blob/main/README.md#limitations).
+        The bridge can only do what Bitwig's Controller API offers. What it does not cover yet, and why, is listed under [Limitations](https://github.com/zkyron-de/bitwig-agent-bridge/blob/main/docs/limitations.md).
   - type: textarea
     id: goal
     attributes:

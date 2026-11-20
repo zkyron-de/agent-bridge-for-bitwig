@@ -1,0 +1,125 @@
+# Setup
+
+The [README](../README.md#quick-start) has the short version for Claude Code. This page covers every step in detail, other agents, and uninstalling.
+
+## Requirements
+
+| Requirement | Minimum |
+|---|---|
+| macOS | 13 Ventura or newer (Apple silicon and Intel) |
+| Bitwig Studio | 6.x with Controller API 25 (tested with 6.1.7) |
+| Node.js | 20 or newer |
+
+Only the controller-script install path in `scripts/setup.mjs` is macOS-specific.
+
+## Install
+
+In the checkout, run:
+
+```sh
+npm run setup
+```
+
+It installs the MCP server's dependencies, creates a per-install secret at `data/bridge-token` (never committed) and installs the controller script, with the secret stamped in, at `~/Documents/Bitwig Studio/Controller Scripts/Bitwig Agent Bridge/`. It is safe to re-run at any time, for example after pulling changes or moving the checkout. Flags: `--skip-install`, `--skip-controller`.
+
+## Set up Bitwig
+
+Setup installs the controller script into Bitwig's default controller-script folder (`~/Documents/Bitwig Studio/Controller Scripts/Bitwig Agent Bridge/`). Add it once:
+
+1. In Bitwig, open the Dashboard (the Bitwig logo, top center) → **Settings** → **Controllers**.
+2. Click **+ Add Controller**.
+3. Choose vendor **Bitwig Agent Bridge**, then the controller of the same name, and click **Add**.
+4. The entry's power button should be on. You'll see the **"Bitwig Agent Bridge online"** popup, and the script console (the `>` icon on the controller entry) logs `Bitwig Agent Bridge <version> listening on UDP 50701`.
+
+**Reloading.** After re-running setup (which re-stamps the secret into the controller script), Bitwig usually reloads the script by itself. If it does not, toggle the controller's power button off and on in Settings → Controllers, or restart Bitwig.
+
+**If the controller isn't listed at all**, Bitwig is probably looking in a non-default location: Settings → **Locations** → "My Controller Scripts" should point at `~/Documents/Bitwig Studio/Controller Scripts` (the default). If you've customized it, either restore the default or copy the `Bitwig Agent Bridge` folder into your custom location — but always the setup-installed copy, never the repo file, which has no secret stamped in.
+
+## Connect your agent
+
+- **Command:** `node <install-path>/src/index.mjs`
+- **Transport:** stdio — no URL, no port, no network setup
+- Bitwig must be open for tools to work; the agent config is one-time.
+
+### Agent configuration
+
+Replace `/path/to/bitwig-agent-bridge` with your install folder. The server name `bitwig` is up to you.
+
+**Claude Code** — adds it for every project:
+
+```sh
+claude mcp add --scope user bitwig -- node /path/to/bitwig-agent-bridge/src/index.mjs
+```
+
+**OpenAI Codex** — the CLI, IDE extension and desktop app share this setting:
+
+```sh
+codex mcp add bitwig -- node /path/to/bitwig-agent-bridge/src/index.mjs
+```
+
+Or add it to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.bitwig]
+command = "node"
+args = ["/path/to/bitwig-agent-bridge/src/index.mjs"]
+```
+
+**Grok CLI** — saves it to `~/.grok/config.toml`:
+
+```sh
+grok mcp add bitwig -- node /path/to/bitwig-agent-bridge/src/index.mjs
+```
+
+**GitHub Copilot in VS Code** — run **MCP: Add Server** from the Command Palette, choose **Command (stdio)**, enter `node /path/to/bitwig-agent-bridge/src/index.mjs`, name it `bitwig`, then pick **Global** → **Copilot Global**. That writes `~/.copilot/mcp-config.json`, which you can also edit directly:
+
+```json
+{
+  "mcpServers": {
+    "bitwig": {
+      "command": "node",
+      "args": ["/path/to/bitwig-agent-bridge/src/index.mjs"]
+    }
+  }
+}
+```
+
+**Claude Desktop, Cursor, Windsurf and Cline** use the standard `mcpServers` block:
+
+```json
+{
+  "mcpServers": {
+    "bitwig": {
+      "command": "node",
+      "args": ["/path/to/bitwig-agent-bridge/src/index.mjs"]
+    }
+  }
+}
+```
+
+Merge it into the file each one reads, then restart it or refresh its MCP list:
+
+- **Claude Desktop:** Settings → Developer → Edit Config opens `~/Library/Application Support/Claude/claude_desktop_config.json`.
+- **Cursor:** `~/.cursor/mcp.json`, or `.cursor/mcp.json` in a project.
+- **Windsurf:** in the Cascade panel, open the `...` menu and choose **Open MCP config file** to edit `mcp_config.json`.
+- **Cline:** click the MCP Servers icon in the Cline panel, open **Configure**, then **Configure MCP Servers**. The Cline CLI can add it in one line: `cline mcp add bitwig --yes -- node /path/to/bitwig-agent-bridge/src/index.mjs`.
+
+With Claude Code, check the connection with `claude mcp list` (or `/mcp` inside a session), then ask something like "Call bitwig_status and list the tracks". The tools appear as `mcp__bitwig__bitwig_status` and so on; allow them once, or add `mcp__bitwig` to the allowed tools with `/permissions`.
+
+## Files and locations
+
+| What | Where |
+|---|---|
+| Per-install secret | `<install>/data/bridge-token` |
+| MCP request log | `<install>/logs/bitwig-agent-bridge.jsonl` |
+| Controller script (installed copy) | `~/Documents/Bitwig Studio/Controller Scripts/Bitwig Agent Bridge/` |
+
+Port (loopback-only): `50701/udp` bridge.
+
+## Uninstall
+
+```sh
+rm -rf ~/Documents/"Bitwig Studio"/"Controller Scripts"/"Bitwig Agent Bridge"
+```
+
+Then remove the controller in Bitwig's Settings → Controllers, delete the install folder, and remove the server from your agent (for Claude Code: `claude mcp remove bitwig`). Bitwig Agent Bridge writes nowhere else.
