@@ -1,12 +1,12 @@
 loadAPI(25);
 
-host.defineController("Agent Bridge for Bitwig", "Agent Bridge for Bitwig", "2.0.0", "8A319A60-5BAF-4C0D-B613-16D646B1E8A6", "_zkyron, based on Bitwig Control Deck by Remy Mazmanian");
+host.defineController("Agent Bridge for Bitwig", "Agent Bridge for Bitwig", "2.1.0", "8A319A60-5BAF-4C0D-B613-16D646B1E8A6", "_zkyron, based on Bitwig Control Deck by Remy Mazmanian");
 // No MIDI: all control data uses an authenticated local UDP channel that never
 // leaves this Mac. Without MIDI ports there is nothing for Bitwig to auto-detect,
 // so the controller is added once by hand in Settings → Controllers.
 host.defineMidiPorts(0, 0);
 
-var BRIDGE_VERSION = "2.0.0";
+var BRIDGE_VERSION = "2.1.0";
 var BRIDGE_PROTOCOL = "agent-bridge-for-bitwig/1";
 var BRIDGE_PORT = 50701;
 // Stamped with a per-install secret by `npm run setup`. The bridge refuses to

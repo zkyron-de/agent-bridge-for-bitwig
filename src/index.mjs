@@ -6,7 +6,7 @@ import { BitwigClient } from "./bitwig-client.mjs";
 import { registerTools } from "./tools.mjs";
 
 const client = new BitwigClient();
-const server = new McpServer({ name: "agent-bridge-for-bitwig", version: "2.0.0" });
+const server = new McpServer({ name: "agent-bridge-for-bitwig", version: "2.1.0" });
 const logDirectory = new URL("../logs/", import.meta.url);
 const logFile = new URL("agent-bridge-for-bitwig.jsonl", logDirectory);
 

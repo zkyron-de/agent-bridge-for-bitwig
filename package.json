@@ -1,6 +1,6 @@
 {
   "name": "agent-bridge-for-bitwig",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
   "description": "Agent Bridge for Bitwig: an MCP bridge for exact, read-back-verified Bitwig Studio control",
