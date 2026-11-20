@@ -6,11 +6,11 @@ The [README](../README.md#quick-start) has the short version for Claude Code. Th
 
 | Requirement | Minimum |
 |---|---|
-| System | macOS 13 Ventura or newer (Apple silicon and Intel), or Linux. Windows is untested so far, see below. |
+| System | macOS 13 Ventura or newer (Apple silicon and Intel), Windows or Linux |
 | Bitwig Studio | 6.x with Controller API 25 (tested with 6.1.7) |
 | Node.js | 20 or newer |
 
-**Tested on** macOS with Bitwig 6.1.7, and Linux with Bitwig 6.1.7 as Flatpak on Kubuntu. Setup also knows where Bitwig keeps its files on Windows, but that has not been tested yet. If you try it on Windows, or on a Linux setup that differs, run the [smoke test](#check-the-connection) and [open an issue](https://github.com/zkyron-de/agent-bridge-for-bitwig/issues/new/choose) with its output, whether it passes or not.
+**Tested on** macOS and Linux with Bitwig 6.1.7 (on Linux as Flatpak on Kubuntu), and on Windows 11. Loading a sample by a Windows path (`C:\…`) has not been tried in Bitwig yet. If your setup differs, run the [smoke test](#check-the-connection) and [open an issue](https://github.com/zkyron-de/agent-bridge-for-bitwig/issues/new/choose) with its output, whether it passes or not.
 
 ## Install
 

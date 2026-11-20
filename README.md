@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/Bitwig_Studio-6.1.7-FF8713" alt="Bitwig Studio 6.1.7">
   <img src="https://img.shields.io/badge/Controller_API-25-FF8713" alt="Controller API 25">
   <img src="https://img.shields.io/badge/MCP-stdio-18181B" alt="MCP over stdio">
-  <img src="https://img.shields.io/badge/macOS-13%2B-18181B" alt="macOS 13 or newer">
+  <img src="https://img.shields.io/badge/macOS%20%7C%20Windows%20%7C%20Linux-18181B" alt="macOS, Windows and Linux">
   <img src="https://img.shields.io/badge/Node.js-20%2B-18181B" alt="Node.js 20 or newer">
 </p>
 
@@ -21,9 +21,9 @@
   <a href="#documentation">Docs</a>
 </p>
 
-Tell an agent what to change in Bitwig Studio. Agent Bridge for Bitwig does it on your Mac, then checks that Bitwig actually did it.
+Tell an agent what to change in Bitwig Studio. Agent Bridge for Bitwig does it on your computer, then checks that Bitwig actually did it.
 
-Agent Bridge for Bitwig is a local [MCP](https://modelcontextprotocol.io) server for Bitwig Studio 6 on macOS. It gives an agent such as Claude Code exact, read-back-verified control of tracks, the mixer, devices and plug-in parameters, launcher clips and notes, scenes, the transport and Bitwig's own actions, so it can compose, arrange and mix.
+Agent Bridge for Bitwig is a local [MCP](https://modelcontextprotocol.io) server for Bitwig Studio 6 on macOS, Windows and Linux. It gives an agent such as Claude Code exact, read-back-verified control of tracks, the mixer, devices and plug-in parameters, launcher clips and notes, scenes, the transport and Bitwig's own actions, so it can compose, arrange and mix.
 
 <p align="center">
   <img src="assets/demo.png" alt="Claude Code asked to write a bassline; Bitwig Studio shows the new Bass track with Polymer and the verified four-bar clip" width="100%">
@@ -34,13 +34,13 @@ Agent Bridge for Bitwig is a local [MCP](https://modelcontextprotocol.io) server
 - **Exact targets.** Tracks are addressed by Bitwig's track id, which survives renaming and moving. Devices, scenes and clips are addressed by index plus their exact current name, so a stale target is refused instead of changing the wrong thing.
 - **Read back.** A change is reported as done only once Bitwig shows it. Otherwise the reply says what Bitwig holds now.
 - **Strict inputs.** All 24 tools have strict JSON schemas; unknown fields are rejected.
-- **Local only.** Everything runs on your Mac over loopback. Nothing is exposed to the network.
+- **Local only.** Everything runs on your computer over loopback. Nothing is exposed to the network.
 
 > Bitwig Studio is a product of Bitwig GmbH. This project is an independent community tool and is not affiliated with or endorsed by Bitwig.
 
 ## Quick start
 
-You need macOS 13 or newer, Bitwig Studio 6 (tested with 6.1.7) and Node.js 20 or newer.
+You need macOS 13 or newer, Windows or Linux, Bitwig Studio 6 (tested with 6.1.7) and Node.js 20 or newer. Start Bitwig once before setup, so it creates its user folder.
 
 1. **Install.** In the checkout, run `npm run setup`. It installs the dependencies, creates a private secret and installs the controller script into Bitwig's controller folder.
 2. **Add the controller in Bitwig, once.** **Settings → Controllers → + Add Controller**, vendor **Agent Bridge for Bitwig**, controller of the same name. Bitwig shows "Agent Bridge for Bitwig online".
