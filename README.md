@@ -109,7 +109,7 @@ What the Controller API cannot do, and Bitwig behavior the bridge works with. Ev
 - Arranger clips cannot be edited directly. Launcher clips can be printed into the Arranger with `bitwig_arrange_launcher_clips` (first eight scenes, at most 1024 beats per print).
 - Audio clips, automation lanes and per-note pressure. A pressure written through the API does not persist; it is lost when notes are added or changed and on later reads.
 - Saving device presets, nesting devices into containers, and devices inside containers: only top-level devices are listed and edited.
-- Opening, closing, creating and quitting projects. `bitwig_invoke_action` refuses those actions and answers to open dialogs; `Save` is allowed.
+- Opening, closing, creating and quitting projects. `bitwig_invoke_action` refuses those actions and answers to open dialogs. `Save` works on a project that has been saved before: it saves without a dialog, and `observedChanges` shows `projectModified` going from `true` to `false`. On a project that was never saved, Bitwig opens its save dialog instead, which only you can answer.
 - Devices and launcher clips on effect tracks and the master: device and clip tools work on main tracks only.
 - Samples by name. The browser's Devices/Presets/Samples tabs cannot be switched through the API, so samples load only by file path, and only on instrument or hybrid tracks (on an audio track Bitwig would load the file into Convolution as an impulse response).
 
