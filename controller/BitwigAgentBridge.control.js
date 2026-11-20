@@ -22,6 +22,12 @@ var MAX_SCENES = 8;
 // them at a time, and withSceneSlot scrolls that window to reach the rest.
 var MAX_SCENE_SLOTS = 1024;
 var MAX_CUE_MARKERS = 256;
+// Transport limits: tempo range Bitwig accepts, the furthest beat position the
+// tools set, and how far a beat position may read back from the request.
+var MIN_TEMPO = 20;
+var MAX_TEMPO = 666;
+var MAX_TRANSPORT_BEATS = 1000000;
+var BEAT_TOLERANCE = 0.001;
 // Launcher: most scenes one bitwig_launcher reply covers, wait after a scene
 // window scroll, and how long launch and stop wait for Bitwig's slot states.
 var MAX_LAUNCHER_SCENES_PER_REPLY = 128;
@@ -1476,31 +1482,203 @@ function differs(actual, requested, tolerance) {
    return !(Math.abs(Number(actual) - Number(requested)) <= tolerance);
 }
 
-function handleTransport(request) {
-   var params = request.params;
-   var action = String(params.action || "status");
-   if (action === "play") transport.play();
-   else if (action === "stop") transport.stop();
-   else if (action === "toggle") transport.togglePlay();
-   else if (action === "set_tempo") {
-      var tempo = Number(params.tempo);
-      if (!(tempo >= 20 && tempo <= 666)) throw new Error("Tempo must be between 20 and 666 BPM.");
-      transport.tempo().value().setRaw(tempo);
-      verifyReadback(request, function() {
-         var actual = transport.tempo().value().getRaw();
-         return differs(actual, tempo, 0.01) ? "tempo is " + actual + " BPM, requested " + tempo + " BPM." : "";
-      }, function() {
-         finish(request, true, readTransport());
-      });
-      return;
-   } else if (action === "set_position") {
-      var position = Number(params.positionBeats);
-      if (!(position >= 0)) throw new Error("Position must be zero or greater.");
-      transport.setPosition(position);
-   } else if (action !== "status") throw new Error("Unknown transport action: " + action);
+// Values Bitwig documents for these transport enums (API 2 and 8).
+var PRE_ROLL_VALUES = ["none", "one_bar", "two_bars", "four_bars"];
+var AUTOMATION_WRITE_MODES = ["latch", "touch", "write"];
+var DEFAULT_LAUNCH_QUANTIZATIONS = ["none", "8", "4", "2", "1", "1/2", "1/4", "1/8", "1/16"];
+var PLAYBACK_ACTIONS = ["play", "stop", "continue", "restart"];
 
-   later(action === "status" ? 1 : 100, function() {
-      finish(request, true, readTransport());
+function transportSnapshot() {
+   var signature = transport.timeSignature();
+   return {
+      playing: transport.isPlaying().get(),
+      arrangerRecord: transport.isArrangerRecordEnabled().get(),
+      tempo: roundTo(transport.tempo().value().getRaw(), 3),
+      timeSignature: signature.numerator().get() + "/" + signature.denominator().get(),
+      positionBeats: roundTo(transport.getPosition().get(), 4),
+      playStartBeats: roundTo(transport.playStartPosition().get(), 4),
+      loop: {
+         enabled: transport.isArrangerLoopEnabled().get(),
+         startBeats: roundTo(transport.arrangerLoopStart().get(), 4),
+         lengthBeats: roundTo(transport.arrangerLoopDuration().get(), 4)
+      },
+      metronome: {
+         enabled: transport.isMetronomeEnabled().get(),
+         volume: roundTo(transport.metronomeVolume().get(), 4),
+         volumeDisplay: transport.metronomeVolume().displayedValue().get()
+      },
+      preRoll: transport.preRoll().get(),
+      arrangerOverdub: transport.isArrangerOverdubEnabled().get(),
+      launcherOverdub: transport.isClipLauncherOverdubEnabled().get(),
+      automationWrite: { arranger: transport.isArrangerAutomationWriteEnabled().get(), mode: transport.automationWriteMode().get() },
+      defaultLaunchQuantization: transport.defaultLaunchQuantization().get()
+   };
+}
+
+function requireEnum(value, allowed, label) {
+   var text = String(value);
+   if (allowed.indexOf(text) === -1) throw new Error(label + " must be one of " + allowed.join(", ") + ".");
+   return text;
+}
+
+// Validates every requested change before anything is written.
+function parseTransportChanges(params) {
+   var c = {};
+   var any = false;
+   function take(key, parse) {
+      if (params[key] === undefined) return;
+      c[key] = parse(params[key]);
+      any = true;
+   }
+   take("playback", function(v) { return requireEnum(v, PLAYBACK_ACTIONS, "playback"); });
+   take("arrangerRecord", Boolean);
+   take("tempo", function(v) {
+      var tempo = Number(v);
+      if (!(tempo >= MIN_TEMPO && tempo <= MAX_TEMPO)) throw new Error("tempo must be from " + MIN_TEMPO + " to " + MAX_TEMPO + " BPM.");
+      return tempo;
+   });
+   take("timeSignature", function(v) {
+      var match = /^(\d{1,2})\/(\d{1,2})$/.exec(String(v));
+      if (!match || Number(match[1]) < 1 || Number(match[2]) < 1) throw new Error("timeSignature must look like 4/4 or 7/8.");
+      return { numerator: Number(match[1]), denominator: Number(match[2]), text: Number(match[1]) + "/" + Number(match[2]) };
+   });
+   take("positionBeats", function(v) {
+      var beats = Number(v);
+      if (!(beats >= 0 && beats <= MAX_TRANSPORT_BEATS)) throw new Error("positionBeats must be from 0 to " + MAX_TRANSPORT_BEATS + ".");
+      return beats;
+   });
+   take("loop", function(v) {
+      var loop = {};
+      if (v.enabled !== undefined) loop.enabled = Boolean(v.enabled);
+      if (v.startBeats !== undefined) {
+         loop.startBeats = Number(v.startBeats);
+         if (!(loop.startBeats >= 0 && loop.startBeats <= MAX_TRANSPORT_BEATS)) throw new Error("loop.startBeats must be from 0 to " + MAX_TRANSPORT_BEATS + ".");
+      }
+      if (v.lengthBeats !== undefined) {
+         loop.lengthBeats = Number(v.lengthBeats);
+         if (!(loop.lengthBeats > 0 && loop.lengthBeats <= MAX_TRANSPORT_BEATS)) throw new Error("loop.lengthBeats must be above 0 and at most " + MAX_TRANSPORT_BEATS + ".");
+      }
+      if (loop.enabled === undefined && loop.startBeats === undefined && loop.lengthBeats === undefined) throw new Error("loop needs enabled, startBeats or lengthBeats.");
+      return loop;
+   });
+   take("metronome", function(v) {
+      var metronome = {};
+      if (v.enabled !== undefined) metronome.enabled = Boolean(v.enabled);
+      if (v.volume !== undefined) {
+         metronome.volume = Number(v.volume);
+         if (!(metronome.volume >= 0 && metronome.volume <= 1)) throw new Error("metronome.volume must be a normalized value from 0 to 1.");
+      }
+      if (metronome.enabled === undefined && metronome.volume === undefined) throw new Error("metronome needs enabled or volume.");
+      return metronome;
+   });
+   take("preRoll", function(v) { return requireEnum(v, PRE_ROLL_VALUES, "preRoll"); });
+   take("arrangerOverdub", Boolean);
+   take("launcherOverdub", Boolean);
+   take("automationWrite", function(v) {
+      var write = {};
+      if (v.arranger !== undefined) write.arranger = Boolean(v.arranger);
+      if (v.mode !== undefined) write.mode = requireEnum(v.mode, AUTOMATION_WRITE_MODES, "automationWrite.mode");
+      if (write.arranger === undefined && write.mode === undefined) throw new Error("automationWrite needs arranger or mode.");
+      return write;
+   });
+   take("defaultLaunchQuantization", function(v) { return requireEnum(v, DEFAULT_LAUNCH_QUANTIZATIONS, "defaultLaunchQuantization"); });
+   // Bitwig turns launcher overdub off whenever the transport stops (measured
+   // in Bitwig 6.1.7), so this pair cannot both hold afterwards.
+   if (c.playback === "stop" && c.launcherOverdub === true) throw new Error("Bitwig turns launcher overdub off when the transport stops; set launcherOverdub after stopping.");
+   return any ? c : null;
+}
+
+function transportProblems(c, startedAt) {
+   var s = transportSnapshot();
+   var problems = [];
+   function check(label, actual, wanted) {
+      if (actual !== wanted) problems.push(label + " is " + actual + ", requested " + wanted);
+   }
+   function checkNumber(label, actual, wanted, tolerance, unit) {
+      if (differs(actual, wanted, tolerance)) problems.push(label + " is " + actual + unit + ", requested " + wanted + unit);
+   }
+   if (c.tempo !== undefined) checkNumber("tempo", s.tempo, c.tempo, 0.01, " BPM");
+   if (c.timeSignature) check("timeSignature", s.timeSignature, c.timeSignature.text);
+   if (c.loop) {
+      if (c.loop.enabled !== undefined) check("loop.enabled", s.loop.enabled, c.loop.enabled);
+      if (c.loop.startBeats !== undefined) checkNumber("loop.startBeats", s.loop.startBeats, c.loop.startBeats, BEAT_TOLERANCE, "");
+      if (c.loop.lengthBeats !== undefined) checkNumber("loop.lengthBeats", s.loop.lengthBeats, c.loop.lengthBeats, BEAT_TOLERANCE, "");
+   }
+   if (c.metronome) {
+      if (c.metronome.enabled !== undefined) check("metronome.enabled", s.metronome.enabled, c.metronome.enabled);
+      if (c.metronome.volume !== undefined) checkNumber("metronome.volume", s.metronome.volume, c.metronome.volume, 0.01, "");
+   }
+   if (c.preRoll) check("preRoll", s.preRoll, c.preRoll);
+   if (c.arrangerOverdub !== undefined) check("arrangerOverdub", s.arrangerOverdub, c.arrangerOverdub);
+   if (c.launcherOverdub !== undefined) check("launcherOverdub", s.launcherOverdub, c.launcherOverdub);
+   if (c.automationWrite) {
+      if (c.automationWrite.arranger !== undefined) check("automationWrite.arranger", s.automationWrite.arranger, c.automationWrite.arranger);
+      if (c.automationWrite.mode) check("automationWrite.mode", s.automationWrite.mode, c.automationWrite.mode);
+   }
+   if (c.defaultLaunchQuantization) check("defaultLaunchQuantization", s.defaultLaunchQuantization, c.defaultLaunchQuantization);
+   if (c.arrangerRecord !== undefined) check("arrangerRecord", s.arrangerRecord, c.arrangerRecord);
+   if (c.positionBeats !== undefined) {
+      // A running transport moves on from the new position.
+      var slack = s.playing ? Math.max(BEAT_TOLERANCE, (Date.now() - startedAt) / 1000 * s.tempo / 60 + 0.5) : BEAT_TOLERANCE;
+      if (s.positionBeats < c.positionBeats - BEAT_TOLERANCE || s.positionBeats > c.positionBeats + slack) {
+         problems.push("positionBeats is " + s.positionBeats + ", requested " + c.positionBeats);
+      }
+   }
+   if (c.playback === "stop") check("playing", s.playing, false);
+   else if (c.playback) check("playing", s.playing, true);
+   return problems.join("; ");
+}
+
+function handleTransport(request) {
+   var c = parseTransportChanges(request.params);
+   if (!c) {
+      finish(request, true, transportSnapshot());
+      return;
+   }
+   if (c.tempo !== undefined) transport.tempo().value().setRaw(c.tempo);
+   if (c.timeSignature) transport.timeSignature().set(c.timeSignature.text);
+   if (c.loop) {
+      if (c.loop.startBeats !== undefined) transport.arrangerLoopStart().set(c.loop.startBeats);
+      if (c.loop.lengthBeats !== undefined) transport.arrangerLoopDuration().set(c.loop.lengthBeats);
+      if (c.loop.enabled !== undefined) transport.isArrangerLoopEnabled().set(c.loop.enabled);
+   }
+   if (c.metronome) {
+      if (c.metronome.enabled !== undefined) transport.isMetronomeEnabled().set(c.metronome.enabled);
+      // set() is ignored for the metronome volume; setImmediately() takes
+      // (measured in Bitwig 6.1.7).
+      if (c.metronome.volume !== undefined) transport.metronomeVolume().setImmediately(c.metronome.volume);
+   }
+   if (c.preRoll) transport.preRoll().set(c.preRoll);
+   if (c.arrangerOverdub !== undefined) transport.isArrangerOverdubEnabled().set(c.arrangerOverdub);
+   if (c.launcherOverdub !== undefined) transport.isClipLauncherOverdubEnabled().set(c.launcherOverdub);
+   if (c.automationWrite) {
+      if (c.automationWrite.mode) transport.automationWriteMode().set(c.automationWrite.mode);
+      if (c.automationWrite.arranger !== undefined) transport.isArrangerAutomationWriteEnabled().set(c.automationWrite.arranger);
+   }
+   if (c.defaultLaunchQuantization) transport.defaultLaunchQuantization().set(c.defaultLaunchQuantization);
+   if (c.positionBeats !== undefined) {
+      // setPosition is ignored while the transport runs; moving the play
+      // start and jumping to it works then. A stopped transport takes
+      // setPosition, which moves the play start too, while jumping would start
+      // playback (both measured in Bitwig 6.1.7).
+      if (transport.isPlaying().get()) {
+         transport.playStartPosition().set(c.positionBeats);
+         transport.jumpToPlayStartPosition();
+      } else {
+         transport.setPosition(c.positionBeats);
+      }
+   }
+   // Record and playback go last, so they start with every other setting in place.
+   if (c.arrangerRecord !== undefined) transport.isArrangerRecordEnabled().set(c.arrangerRecord);
+   if (c.playback === "play") transport.play();
+   else if (c.playback === "stop") transport.stop();
+   else if (c.playback === "continue") transport.continuePlayback();
+   else if (c.playback === "restart") transport.restart();
+   var startedAt = Date.now();
+   verifyReadback(request, function() {
+      return transportProblems(c, startedAt);
+   }, function() {
+      finish(request, true, transportSnapshot());
    });
 }
 
@@ -3776,6 +3954,18 @@ function init() {
    interested(transport.tempo().value());
    interested(transport.tempo().value().displayedValue());
    interested(transport.getPosition());
+   interested(transport.playStartPosition());
+   interested(transport.timeSignature().numerator());
+   interested(transport.timeSignature().denominator());
+   interested(transport.arrangerLoopStart());
+   interested(transport.arrangerLoopDuration());
+   interested(transport.isMetronomeEnabled());
+   interested(transport.metronomeVolume());
+   interested(transport.metronomeVolume().displayedValue());
+   interested(transport.preRoll());
+   interested(transport.automationWriteMode());
+   interested(transport.isArrangerAutomationWriteEnabled());
+   interested(transport.defaultLaunchQuantization());
    interested(application.hasActiveEngine());
 
    for (var i = 0; i < MAX_TRACKS; i++) {

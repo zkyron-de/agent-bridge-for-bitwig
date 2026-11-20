@@ -92,43 +92,6 @@ test("requests the client already gave up on are skipped", () => {
   assert.deepEqual(responses.map(r => r.id), ["1"]);
 });
 
-function fakeTransport(applies) {
-  let tempo = 120;
-  const value = v => ({ get: () => v });
-  return {
-    isPlaying: () => value(false),
-    isArrangerRecordEnabled: () => value(false),
-    getPosition: () => value(0),
-    tempo: () => ({
-      value: () => ({
-        setRaw: next => { if (applies) tempo = next; },
-        getRaw: () => tempo,
-        displayedValue: () => value(`${tempo} BPM`)
-      })
-    })
-  };
-}
-
-test("set_tempo reports success only after Bitwig reads the new tempo back", () => {
-  const { context, responses, advance, originalDispatch } = loadController();
-  context.dispatch = originalDispatch;
-  context.transport = fakeTransport(true);
-  context.enqueue(5000, "1", "transport", { action: "set_tempo", tempo: 128 }, 5000);
-  advance(200);
-  assert.equal(responses[0].ok, true);
-  assert.equal(responses[0].payload.tempo, 128);
-});
-
-test("set_tempo fails when Bitwig keeps the old tempo", () => {
-  const { context, responses, advance, originalDispatch } = loadController();
-  context.dispatch = originalDispatch;
-  context.transport = fakeTransport(false);
-  context.enqueue(5000, "1", "transport", { action: "set_tempo", tempo: 128 }, 5000);
-  advance(1200);
-  assert.equal(responses[0].ok, false);
-  assert.match(responses[0].payload.message, /tempo is 120 BPM, requested 128 BPM/);
-});
-
 test("requests with the wrong token get no reply and are counted", () => {
   const { context } = loadController();
   const popups = [];

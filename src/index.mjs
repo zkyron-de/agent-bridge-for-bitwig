@@ -96,13 +96,32 @@ server.registerTool("bitwig_invoke_action", {
 }, async args => call("invoke_action", args));
 
 server.registerTool("bitwig_transport", {
-  description: "Read or control Bitwig transport. Tempo changes are read back before success is reported.",
-  inputSchema: {
-    action: z.enum(["status", "play", "stop", "toggle", "set_tempo", "set_position"]),
-    tempo: z.number().min(20).max(666).optional(),
-    positionBeats: z.number().nonnegative().optional()
-  }
-}, async args => call("transport", args));
+  description: "Read the transport (no fields), or change it: playback, arranger record, tempo, time signature, playhead position, arranger loop, metronome, pre-roll, overdub, automation write and default launch quantization. Settings are applied first, then position, then record and playback; every change is read back and the reply is the full transport state.",
+  inputSchema: z.strictObject({
+    playback: z.enum(["play", "stop", "continue", "restart"]).optional().describe("play starts, continue resumes from the playhead, restart jumps back to the play start while playing (Bitwig 6.1.7 started at beat 0 when stopped). Stopping also turns launcher overdub off"),
+    arrangerRecord: z.boolean().optional().describe("Arranger record; while playing this records onto armed tracks. Bitwig switches arranger automation write along with it"),
+    tempo: z.number().min(20).max(666).optional().describe("BPM"),
+    timeSignature: z.string().regex(/^\d{1,2}\/\d{1,2}$/).optional().describe("e.g. 4/4, 6/8, 7/8"),
+    positionBeats: z.number().min(0).max(1000000).optional().describe("Playhead position in beats (quarter notes) from the project start; also moves the play start marker. Works while playing too"),
+    loop: z.strictObject({
+      enabled: z.boolean().optional(),
+      startBeats: z.number().min(0).max(1000000).optional(),
+      lengthBeats: z.number().positive().max(1000000).optional()
+    }).optional().describe("Arranger loop"),
+    metronome: z.strictObject({
+      enabled: z.boolean().optional(),
+      volume: z.number().min(0).max(1).optional().describe("Normalized 0-1; the reply shows Bitwig's display value")
+    }).optional(),
+    preRoll: z.enum(["none", "one_bar", "two_bars", "four_bars"]).optional(),
+    arrangerOverdub: z.boolean().optional(),
+    launcherOverdub: z.boolean().optional(),
+    automationWrite: z.strictObject({
+      arranger: z.boolean().optional().describe("Arranger automation write on or off"),
+      mode: z.enum(["latch", "touch", "write"]).optional()
+    }).optional(),
+    defaultLaunchQuantization: z.enum(["none", "8", "4", "2", "1", "1/2", "1/4", "1/8", "1/16"]).optional()
+  })
+}, async args => call("transport", args, 15000));
 
 server.registerTool("bitwig_cue_markers", {
   description: "List Arranger cue markers, or create/update a named marker set at exact beat positions with Bitwig readback verification.",
