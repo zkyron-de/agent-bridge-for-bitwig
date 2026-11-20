@@ -30,6 +30,7 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 - List, create, position, and rename Arranger cue markers with readback verification
 - Read, write and edit launcher clips: name, color, loop, and notes with velocity, duration, timbre, pan and gain on a grid of up to 960 steps per beat
 - Build Arranger MIDI clips from existing launcher patterns at exact beat positions
+- Read the launcher (scenes, clips and their play state); create, duplicate, name and color scenes; launch scenes and clips with quantization, stop tracks or return to the arrangement
 - List, create, and safely delete tracks; set name, color, volume (dB), pan, mute, solo, arm and sends on main, effect and master tracks
 - List and safely delete devices; turn them on or off, open plug-in windows, show remote-controls pages
 - Search Bitwig's browser and insert one exact device, preset or plug-in at the end of a chain or before a device; load a sample file into a Sampler

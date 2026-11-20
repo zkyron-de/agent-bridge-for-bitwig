@@ -22,6 +22,13 @@ var MAX_SCENES = 8;
 // them at a time, and withSceneSlot scrolls that window to reach the rest.
 var MAX_SCENE_SLOTS = 1024;
 var MAX_CUE_MARKERS = 256;
+// Launcher: most scenes one bitwig_launcher reply covers, wait after a scene
+// window scroll, and how long launch and stop wait for Bitwig's slot states.
+var MAX_LAUNCHER_SCENES_PER_REPLY = 128;
+var SCENE_WINDOW_SETTLE_MS = 60;
+var LAUNCH_FIRST_CHECK_MS = 150;
+var LAUNCH_WAIT_ATTEMPTS = 20;
+var STOP_WAIT_ATTEMPTS = 10;
 // Longest stretch one launcher print records: about 92 seconds at 666 BPM,
 // inside the print's 115-second limit.
 var MAX_PRINT_SPAN_BEATS = 1024;
@@ -1836,17 +1843,18 @@ function markSlot(slot) {
    interested(slot.hasContent());
    interested(slot.isSelected());
    interested(slot.isPlaying());
+   interested(slot.isPlaybackQueued());
+   interested(slot.isRecording());
+   interested(slot.isRecordingQueued());
+   interested(slot.isStopQueued());
+   interested(slot.color());
 }
 
-function clipSnapshot(slot, slotIndex) {
-   return {
-      slotIndex: slotIndex,
-      exists: slot.exists().get(),
-      name: slot.name().get(),
-      hasContent: slot.hasContent().get(),
-      selected: slot.isSelected().get(),
-      playing: slot.isPlaying().get()
-   };
+function markScene(scene) {
+   interested(scene.exists());
+   interested(scene.name());
+   interested(scene.color());
+   interested(scene.clipCount());
 }
 
 function requireLevel(value, max, label) {
@@ -3119,46 +3127,360 @@ function handleRecordLauncherArrangement(request) {
    later(350, beginWhenReady);
 }
 
-function handleListClips(request) {
-   var params = request.params;
-   var track = requireTrack(params);
-   var sceneCount = Math.min(sceneBank.itemCount().get(), MAX_SCENE_SLOTS);
-   var clips = [];
+// ---------------------------------------------------------------- Launcher
+//
+// Scenes and clip slots are read through the main track bank's scene window
+// (MAX_SCENES at a time), scrolled with withSceneSlot. Only main tracks are
+// covered; effect tracks' launcher slots are not reached.
+
+// Launch options Bitwig documents for launchWithOptions (API 16).
+var LAUNCH_QUANTIZATIONS = ["default", "none", "8", "4", "2", "1", "1/2", "1/4", "1/8", "1/16"];
+var LAUNCH_MODES = ["default", "from_start", "continue_or_from_start", "continue_or_synced", "synced"];
+// Slot states that count as running after a launch, and as still running
+// after a stop.
+var RUNNING_STATES = ["playing", "queued", "recording", "recordingQueued"];
+
+function slotState(slot) {
+   if (!slot.hasContent().get()) return "empty";
+   if (slot.isRecording().get()) return "recording";
+   if (slot.isRecordingQueued().get()) return "recordingQueued";
+   if (slot.isStopQueued().get()) return "stopQueued";
+   if (slot.isPlaying().get()) return "playing";
+   if (slot.isPlaybackQueued().get()) return "queued";
+   return "stopped";
+}
+
+function sceneSnapshot(scene, sceneIndex) {
+   return { index: sceneIndex, name: scene.name().get(), color: colorHex(scene.color()), clipCount: scene.clipCount().get() };
+}
+
+// Main tracks the bridge reaches, as [{ index, track }].
+function mainTracks() {
+   var list = [];
+   var count = Math.min(trackBank.itemCount().get(), MAX_TRACKS);
+   for (var i = 0; i < count; i++) {
+      var track = trackBank.getItemAt(i);
+      if (track.exists().get()) list.push({ index: i, track: track });
+   }
+   return list;
+}
+
+// Walks scenes start..end-1 window by window and calls
+// onScene(sceneIndex, scene, slotOf), where slotOf(trackIndex) returns that
+// track's slot in the scene; then calls done().
+function scanScenes(request, start, end, onScene, done) {
    function readWindow(windowStart) {
-      if (windowStart >= sceneCount) {
-         finish(request, true, {
-            track: { index: params.trackIndex, name: params.trackName },
-            sceneCount: sceneBank.itemCount().get(),
-            clips: clips
-         });
+      if (windowStart >= end) {
+         done();
          return;
       }
-      withSceneSlot(request, track, windowStart, function(firstSlot, firstLocal) {
-         later(60, function() {
-            var slots = track.clipLauncherSlotBank();
+      withSceneSlot(request, null, windowStart, function(firstScene, firstLocal) {
+         later(SCENE_WINDOW_SETTLE_MS, function() {
             var position = windowStart - firstLocal;
-            var end = Math.min(position + MAX_SCENES, sceneCount);
-            for (var slotIndex = windowStart; slotIndex < end; slotIndex++) {
-               var snapshot = clipSnapshot(slots.getItemAt(slotIndex - position), slotIndex);
-               if (snapshot.hasContent) clips.push(snapshot);
+            var stop = Math.min(position + MAX_SCENES, end);
+            for (var sceneIndex = windowStart; sceneIndex < stop; sceneIndex++) {
+               var local = sceneIndex - position;
+               onScene(sceneIndex, sceneBank.getItemAt(local), function(trackIndex) {
+                  return trackBank.getItemAt(trackIndex).clipLauncherSlotBank().getItemAt(local);
+               });
             }
-            readWindow(end);
+            readWindow(stop);
          });
       });
    }
-   later(120, function() {
-      readWindow(0);
+   readWindow(start);
+}
+
+function launcherTrackState(entry) {
+   return {
+      index: entry.index,
+      name: entry.track.name().get(),
+      stopped: entry.track.isStopped().get(),
+      stopQueued: entry.track.isQueuedForStop().get()
+   };
+}
+
+function handleLauncher(request) {
+   var params = request.params;
+   var tracks = mainTracks();
+   if (params.trackIndex !== undefined) {
+      requireTrack(params);
+      tracks = [{ index: Number(params.trackIndex), track: trackBank.getItemAt(Number(params.trackIndex)) }];
+   }
+   var sceneCount = sceneBank.itemCount().get();
+   var start = Math.min(Math.max(0, Math.floor(Number(params.sceneOffset || 0))), sceneCount);
+   var limit = Math.max(1, Math.min(MAX_LAUNCHER_SCENES_PER_REPLY, Math.floor(Number(params.sceneLimit || 32))));
+   var end = Math.min(sceneCount, start + limit);
+   var scenes = [];
+   later(SCENE_WINDOW_SETTLE_MS, function() {
+      scanScenes(request, start, end, function(sceneIndex, scene, slotOf) {
+         var entry = sceneSnapshot(scene, sceneIndex);
+         entry.clips = [];
+         for (var t = 0; t < tracks.length; t++) {
+            var slot = slotOf(tracks[t].index);
+            if (!slot.hasContent().get()) continue;
+            entry.clips.push({
+               trackIndex: tracks[t].index,
+               trackName: tracks[t].track.name().get(),
+               name: slot.name().get(),
+               color: colorHex(slot.color()),
+               state: slotState(slot)
+            });
+         }
+         scenes.push(entry);
+      }, function() {
+         finish(request, true, {
+            sceneCount: sceneCount,
+            sceneOffset: start,
+            returned: scenes.length,
+            scenes: scenes,
+            tracks: tracks.map(launcherTrackState),
+            transport: readTransport()
+         });
+      });
    });
 }
 
-function handleLaunchScene(request) {
-   var slotIndex = requireSlotIndex(request.params.slotIndex, "Scene");
-   withSceneSlot(request, null, slotIndex, function(scene) {
-      scene.launchWithOptions("none", "from_start");
-      later(180, function() {
-         finish(request, true, { slotIndex: slotIndex, transport: readTransport() });
+// Finds the scene at params.sceneIndex and checks its name against
+// params.sceneName (an unnamed scene has the name "").
+function withScene(request, params, callback) {
+   var sceneIndex = requireSlotIndex(params.sceneIndex, "Scene");
+   withSceneSlot(request, null, sceneIndex, function(scene) {
+      var name = scene.name().get();
+      if (name !== String(params.sceneName)) {
+         throw new Error("Safety check failed: scene " + sceneIndex + " is now named ‘" + name + "’, not ‘" + params.sceneName + "’. Refresh with bitwig_launcher first.");
+      }
+      callback(scene, sceneIndex);
+   });
+}
+
+// Polls until the project has `count` scenes, then calls onDone().
+function awaitSceneCount(request, count, what, onDone) {
+   var attempt = 0;
+   function poll() {
+      var now = sceneBank.itemCount().get();
+      if (now === count) {
+         onDone();
+         return;
+      }
+      if (attempt++ >= 20) {
+         finish(request, false, { message: "Bitwig did not " + what + ": the project has " + now + " scenes, expected " + count + "." });
+         return;
+      }
+      later(100, poll);
+   }
+   later(100, poll);
+}
+
+function handleEditScene(request) {
+   var params = request.params;
+   var create = params.create === true;
+   var duplicate = params.duplicate === true;
+   if (create && duplicate) throw new Error("Pass create or duplicate, not both.");
+   if (create && (params.sceneIndex !== undefined || params.sceneName !== undefined)) throw new Error("create adds a scene at the end; it takes no sceneIndex or sceneName.");
+   if (!create && (params.sceneIndex === undefined || params.sceneName === undefined)) throw new Error("Pass sceneIndex and sceneName, or create: true.");
+   var name;
+   if (params.name !== undefined) {
+      name = String(params.name);
+      if (!name.trim() || name.length > 120) throw new Error("Scene name must contain 1 to 120 characters.");
+   }
+   var color = params.color === undefined ? null : parseHexColor(params.color, "Scene color");
+   if (!create && !duplicate && name === undefined && !color) throw new Error("Nothing to change: pass name or color, or create or duplicate.");
+
+   var before = sceneBank.itemCount().get();
+   if (before + 1 > MAX_SCENE_SLOTS && (create || duplicate)) throw new Error("The project already has " + before + " scenes, the most the bridge reaches.");
+
+   function apply(sceneIndex, origin, check) {
+      withSceneSlot(request, null, sceneIndex, function(scene) {
+         if (check) {
+            var problem = check(scene);
+            if (problem) {
+               finish(request, false, { message: problem, scene: sceneSnapshot(scene, sceneIndex), sceneCount: sceneBank.itemCount().get() });
+               return;
+            }
+         }
+         if (name !== undefined) scene.name().set(name);
+         if (color) scene.color().set(color.red, color.green, color.blue);
+         verifyReadback(request, function() {
+            var problems = [];
+            if (name !== undefined && scene.name().get() !== name) problems.push("name is ‘" + scene.name().get() + "’, requested ‘" + name + "’");
+            if (color && !sameColor(scene.color(), color)) problems.push("color is " + colorHex(scene.color()) + ", requested " + color.hex);
+            return problems.join("; ");
+         }, function() {
+            var payload = { scene: sceneSnapshot(scene, sceneIndex), sceneCount: sceneBank.itemCount().get() };
+            for (var key in origin) payload[key] = origin[key];
+            finish(request, true, payload);
+         });
+      });
+   }
+
+   if (create) {
+      project.createScene();
+      awaitSceneCount(request, before + 1, "add a scene", function() {
+         apply(before, { created: true }, function(scene) {
+            return scene.clipCount().get() === 0 ? "" : "Bitwig added a scene, but the last scene is not empty. Nothing else was changed.";
+         });
+      });
+      return;
+   }
+   withScene(request, params, function(scene, sceneIndex) {
+      if (!duplicate) {
+         apply(sceneIndex, {}, null);
+         return;
+      }
+      var source = sceneSnapshot(scene, sceneIndex);
+      scene.duplicateObject();
+      awaitSceneCount(request, before + 1, "duplicate the scene", function() {
+         apply(sceneIndex + 1, { duplicatedFrom: source }, function(copy) {
+            if (copy.clipCount().get() !== source.clipCount) {
+               return "Bitwig added a scene, but scene " + (sceneIndex + 1) + " holds " + copy.clipCount().get() + " clips where the copy of scene " + sceneIndex + " should hold " + source.clipCount + ". Nothing else was changed.";
+            }
+            return "";
+         });
       });
    });
+}
+
+// Deletes one exact scene with its clips. The bitwig_delete tool reaches it
+// once the delete tools are merged. Bitwig numbers unnamed scenes by position
+// ("Scene 3"), so the scenes after it then report new default names.
+function handleDeleteScene(request) {
+   var params = request.params;
+   var before = sceneBank.itemCount().get();
+   withScene(request, params, function(scene, sceneIndex) {
+      var deleted = sceneSnapshot(scene, sceneIndex);
+      var nextClipCount = null;
+      if (sceneIndex + 1 < before) {
+         var local = sceneIndex - sceneBank.scrollPosition().get();
+         if (local + 1 < MAX_SCENES) nextClipCount = sceneBank.getItemAt(local + 1).clipCount().get();
+      }
+      scene.deleteObject();
+      awaitSceneCount(request, before - 1, "delete the scene", function() {
+         if (nextClipCount === null || sceneIndex >= before - 1) {
+            finish(request, true, { deleted: deleted, sceneCount: sceneBank.itemCount().get() });
+            return;
+         }
+         withSceneSlot(request, null, sceneIndex, function(moved) {
+            if (moved.clipCount().get() !== nextClipCount) {
+               finish(request, false, { message: "The project lost a scene, but scene " + sceneIndex + " now holds " + moved.clipCount().get() + " clips where the scene after the deleted one held " + nextClipCount + ". Check the launcher.", sceneCount: sceneBank.itemCount().get() });
+               return;
+            }
+            finish(request, true, { deleted: deleted, sceneCount: sceneBank.itemCount().get() });
+         });
+      });
+   });
+}
+
+function launchOption(value, allowed, label) {
+   var option = value === undefined ? "default" : String(value);
+   if (allowed.indexOf(option) === -1) throw new Error(label + " must be one of " + allowed.join(", ") + ".");
+   return option;
+}
+
+// Re-reads the given slots until every state passes `ok`, then calls onDone
+// with their states; otherwise fails with the ones that did not.
+function awaitSlotStates(request, entries, ok, describe, onDone) {
+   var attempt = 0;
+   function poll() {
+      var states = [];
+      var problems = [];
+      for (var i = 0; i < entries.length; i++) {
+         var state = slotState(entries[i].slot);
+         states.push({ trackIndex: entries[i].trackIndex, trackName: entries[i].trackName, slotIndex: entries[i].slotIndex, name: entries[i].slot.name().get(), state: state });
+         if (!ok(state)) problems.push("‘" + entries[i].trackName + "’ slot " + entries[i].slotIndex + " is " + state);
+      }
+      if (!problems.length) {
+         onDone(states);
+         return;
+      }
+      if (attempt++ >= LAUNCH_WAIT_ATTEMPTS) {
+         finish(request, false, { message: describe + ": " + problems.join("; ") + ".", clips: states, transport: readTransport() });
+         return;
+      }
+      later(100, poll);
+   }
+   later(LAUNCH_FIRST_CHECK_MS, poll);
+}
+
+function isRunning(state) {
+   return RUNNING_STATES.indexOf(state) !== -1;
+}
+
+function handleLaunch(request) {
+   var params = request.params;
+   var action = params.action === undefined ? "launch" : String(params.action);
+   var hasScene = params.sceneIndex !== undefined || params.sceneName !== undefined;
+   var hasTrack = params.trackIndex !== undefined || params.trackName !== undefined;
+   var hasSlot = params.slotIndex !== undefined;
+
+   if (action === "launch") {
+      var quantization = launchOption(params.quantization, LAUNCH_QUANTIZATIONS, "quantization");
+      var launchMode = launchOption(params.launchMode, LAUNCH_MODES, "launchMode");
+      if (hasScene === (hasTrack || hasSlot)) throw new Error("Launch a scene (sceneIndex and sceneName) or a clip (trackIndex, trackName and slotIndex).");
+      if (hasScene) {
+         withScene(request, params, function(scene, sceneIndex) {
+            var entries = [];
+            var tracks = mainTracks();
+            var local = sceneIndex - sceneBank.scrollPosition().get();
+            for (var t = 0; t < tracks.length; t++) {
+               var slot = tracks[t].track.clipLauncherSlotBank().getItemAt(local);
+               if (slot.hasContent().get()) entries.push({ trackIndex: tracks[t].index, trackName: tracks[t].track.name().get(), slotIndex: sceneIndex, slot: slot });
+            }
+            if (!entries.length) throw new Error("Scene " + sceneIndex + " has no clips on the tracks the bridge reaches; nothing was launched.");
+            scene.launchWithOptions(quantization, launchMode);
+            awaitSlotStates(request, entries, isRunning, "Bitwig did not start every clip of scene " + sceneIndex, function(states) {
+               finish(request, true, { launched: sceneSnapshot(scene, sceneIndex), quantization: quantization, launchMode: launchMode, clips: states, transport: readTransport() });
+            });
+         });
+         return;
+      }
+      if (!hasTrack || !hasSlot) throw new Error("A clip launch needs trackIndex, trackName and slotIndex.");
+      var track = requireTrack(params);
+      var slotIndex = requireSlotIndex(params.slotIndex, "Clip");
+      withSceneSlot(request, track, slotIndex, function(slot) {
+         if (!slot.hasContent().get()) throw new Error("Slot " + slotIndex + " on ‘" + params.trackName + "’ is empty; nothing was launched.");
+         slot.launchWithOptions(quantization, launchMode);
+         var entries = [{ trackIndex: Number(params.trackIndex), trackName: String(params.trackName), slotIndex: slotIndex, slot: slot }];
+         awaitSlotStates(request, entries, isRunning, "Bitwig did not start the clip", function(states) {
+            finish(request, true, { launched: states[0], quantization: quantization, launchMode: launchMode, transport: readTransport() });
+         });
+      });
+      return;
+   }
+
+   if (action !== "stop" && action !== "returnToArrangement") throw new Error("action must be launch, stop or returnToArrangement.");
+   if (hasScene || hasSlot || params.quantization !== undefined || params.launchMode !== undefined) {
+      throw new Error(action + " works on one track (trackIndex and trackName) or, without them, on all tracks; it takes no scene, slot or launch options.");
+   }
+   var targets = hasTrack ? [{ index: Number(params.trackIndex), track: requireTrack(params) }] : mainTracks();
+   for (var i = 0; i < targets.length; i++) {
+      if (action === "stop") targets[i].track.stop();
+      else if (hasTrack) targets[i].track.returnToArrangement();
+   }
+   if (action === "returnToArrangement" && !hasTrack) transport.returnToArrangement();
+
+   // Every clip on the affected tracks must be stopped or about to stop.
+   var attempt = 0;
+   function check() {
+      var running = [];
+      scanScenes(request, 0, sceneBank.itemCount().get(), function(sceneIndex, scene, slotOf) {
+         for (var t = 0; t < targets.length; t++) {
+            var state = slotState(slotOf(targets[t].index));
+            if (isRunning(state)) running.push("‘" + targets[t].track.name().get() + "’ slot " + sceneIndex + " is " + state);
+         }
+      }, function() {
+         if (!running.length) {
+            finish(request, true, { action: action, tracks: targets.map(launcherTrackState), transport: readTransport() });
+            return;
+         }
+         if (attempt++ >= STOP_WAIT_ATTEMPTS) {
+            finish(request, false, { message: "Bitwig did not " + (action === "stop" ? "stop" : "hand back to the arrangement") + " every launcher clip: " + running.join("; ") + ".", tracks: targets.map(launcherTrackState) });
+            return;
+         }
+         later(150, check);
+      });
+   }
+   later(LAUNCH_FIRST_CHECK_MS, check);
 }
 
 function dispatch(request) {
@@ -3259,11 +3581,17 @@ function dispatch(request) {
       case "arrange_launcher_clips":
          handleRecordLauncherArrangement(request);
          return;
-      case "list_clips":
-         handleListClips(request);
+      case "launcher":
+         handleLauncher(request);
          return;
-      case "launch_scene":
-         handleLaunchScene(request);
+      case "edit_scene":
+         handleEditScene(request);
+         return;
+      case "launch":
+         handleLaunch(request);
+         return;
+      case "delete_scene":
+         handleDeleteScene(request);
          return;
       case "browser_search":
          handleBrowserSearch(request);
@@ -3315,6 +3643,8 @@ function markMainTrack(track) {
    markTrack(track);
    interested(track.position());
    interested(track.arm());
+   interested(track.isStopped());
+   interested(track.isQueuedForStop());
    for (var s = 0; s < MAX_SENDS; s++) {
       var send = track.sendBank().getItemAt(s);
       interested(send.exists());
@@ -3387,6 +3717,7 @@ function init() {
    sceneBank = trackBank.sceneBank();
    interested(sceneBank.itemCount());
    interested(sceneBank.scrollPosition());
+   for (var sceneSlot = 0; sceneSlot < MAX_SCENES; sceneSlot++) markScene(sceneBank.getItemAt(sceneSlot));
    cursorTrack = host.createCursorTrack("AGENT_BRIDGE_TRACK_CURSOR", "Agent Bridge Track Cursor", 0, MAX_SCENES, true);
    cursorDevice = cursorTrack.createCursorDevice();
    cursorRemoteControlsPage = cursorDevice.createCursorRemoteControlsPage(8);

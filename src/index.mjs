@@ -311,15 +311,46 @@ server.registerTool("bitwig_arrange_launcher_clips", {
   }
 }, async args => call("arrange_launcher_clips", args, 120000));
 
-server.registerTool("bitwig_clips", {
-  description: "List populated launcher clips in every scene for one exact track.",
-  inputSchema: trackSelector
-}, async args => call("list_clips", args, 60000));
+const sceneSelector = {
+  sceneIndex: z.number().int().min(0).max(1023).describe("Scene index from bitwig_launcher"),
+  sceneName: z.string().describe("Exact current scene name as a safety check; \"\" for an unnamed scene")
+};
 
-server.registerTool("bitwig_launch_scene", {
-  description: "Launch one scene immediately and from the start across all tracks.",
-  inputSchema: { slotIndex: z.number().int().min(0).max(1023).default(0) }
-}, async args => call("launch_scene", args));
+server.registerTool("bitwig_launcher", {
+  description: "Read the clip launcher: scenes (index, name, color, clip count) with the clips in each (track, clip name, color, state: playing, queued, stopQueued, stopped, recording, recordingQueued), every main track's stopped/stop-queued state, and the transport. Paged over scenes; optionally one track only. Effect tracks are not covered.",
+  inputSchema: z.strictObject({
+    trackIndex: z.number().int().min(0).max(63).optional().describe("Only this track (with trackName)"),
+    trackName: z.string().min(1).optional(),
+    sceneOffset: z.number().int().nonnegative().default(0),
+    sceneLimit: z.number().int().min(1).max(128).default(32)
+  })
+}, async args => call("launcher", args, 60000));
+
+server.registerTool("bitwig_edit_scene", {
+  description: "Create a scene at the end (create: true), duplicate one exact scene with its clips (duplicate: true; the copy lands right after it), and/or set the scene's name and color. The new or edited scene is read back. Scene deletion is not part of this tool.",
+  inputSchema: z.strictObject({
+    sceneIndex: sceneSelector.sceneIndex.optional(),
+    sceneName: sceneSelector.sceneName.optional(),
+    create: z.boolean().optional(),
+    duplicate: z.boolean().optional(),
+    name: z.string().min(1).max(120).optional(),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().describe("#RRGGBB")
+  })
+}, async args => call("edit_scene", args, 30000));
+
+server.registerTool("bitwig_launch", {
+  description: "Launch one exact scene or clip, or stop launcher playback / return to the arrangement on one exact track or on all tracks. A launch succeeds once every clip involved is playing or queued; a stop once no clip on the affected tracks is playing or queued (stop-queued counts as stopping). quantization and launchMode default to Bitwig's own settings.",
+  inputSchema: z.strictObject({
+    action: z.enum(["launch", "stop", "returnToArrangement"]).default("launch"),
+    sceneIndex: sceneSelector.sceneIndex.optional(),
+    sceneName: sceneSelector.sceneName.optional(),
+    trackIndex: z.number().int().min(0).max(63).optional(),
+    trackName: z.string().min(1).optional(),
+    slotIndex: z.number().int().min(0).max(1023).optional().describe("Clip slot (scene index) on that track"),
+    quantization: z.enum(["default", "none", "8", "4", "2", "1", "1/2", "1/4", "1/8", "1/16"]).optional().describe("Bars as Bitwig counts them; none launches at once"),
+    launchMode: z.enum(["default", "from_start", "continue_or_from_start", "continue_or_synced", "synced"]).optional()
+  })
+}, async args => call("launch", args, 30000));
 
 server.registerTool("bitwig_delete_device", {
   description: "Delete one exact device. Both the track and device names must still match.",
