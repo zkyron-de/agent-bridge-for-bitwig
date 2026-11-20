@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320" width="1280" height="320" role="img" aria-label="Bitwig Agent Bridge: let AI agents compose, arrange and mix in Bitwig Studio">
+  <title>Bitwig Agent Bridge</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#FFFAF5"/>
+    </linearGradient>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFA54A"/><stop offset="0.55" stop-color="#FF8713"/><stop offset="1" stop-color="#FF5705"/>
+    </linearGradient>
+    <clipPath id="clip"><rect x="1" y="1" width="1278" height="318" rx="24"/></clipPath>
+  </defs>
+  <rect x="1" y="1" width="1278" height="318" rx="24" fill="url(#bg)" stroke="#F1E6DC" stroke-width="2"/>
+  <g clip-path="url(#clip)">
+    <rect x="864.8" y="238.0" width="15.7" height="62.0" rx="7.9" fill="#FF8713" fill-opacity="0.05"/>
+    <rect x="890.1" y="195.1" width="15.7" height="104.9" rx="7.9" fill="#FF8713" fill-opacity="0.07"/>
+    <rect x="915.5" y="155.0" width="15.7" height="145.0" rx="7.9" fill="#FF8713" fill-opacity="0.09"/>
+    <rect x="940.8" y="119.5" width="15.7" height="180.5" rx="7.9" fill="#FF8713" fill-opacity="0.10"/>
+    <rect x="966.1" y="90.1" width="15.7" height="209.9" rx="7.9" fill="#FF8713" fill-opacity="0.11"/>
+    <rect x="991.5" y="68.2" width="15.7" height="231.8" rx="7.9" fill="#FF8713" fill-opacity="0.12"/>
+    <rect x="1016.8" y="54.6" width="15.7" height="245.4" rx="7.9" fill="#FF8713" fill-opacity="0.13"/>
+    <rect x="1042.1" y="50.0" width="15.7" height="250.0" rx="7.9" fill="#FF8713" fill-opacity="0.13"/>
+    <rect x="1067.5" y="54.6" width="15.7" height="245.4" rx="7.9" fill="#FF8713" fill-opacity="0.13"/>
+    <rect x="1092.8" y="68.2" width="15.7" height="231.8" rx="7.9" fill="#FF8713" fill-opacity="0.12"/>
+    <rect x="1118.1" y="90.1" width="15.7" height="209.9" rx="7.9" fill="#FF8713" fill-opacity="0.11"/>
+    <rect x="1143.5" y="119.5" width="15.7" height="180.5" rx="7.9" fill="#FF8713" fill-opacity="0.10"/>
+    <rect x="1168.8" y="155.0" width="15.7" height="145.0" rx="7.9" fill="#FF8713" fill-opacity="0.09"/>
+    <rect x="1194.1" y="195.1" width="15.7" height="104.9" rx="7.9" fill="#FF8713" fill-opacity="0.07"/>
+    <rect x="1219.5" y="238.0" width="15.7" height="62.0" rx="7.9" fill="#FF8713" fill-opacity="0.05"/>
+    <rect x="0" y="312" width="1280" height="8" fill="url(#g)"/>
+  </g>
+  <g transform="translate(72 80) scale(0.625)">
+    <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFA54A"/><stop offset="0.55" stop-color="#FF8713"/><stop offset="1" stop-color="#FF5705"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="58" fill="url(#g)"/>
+  <g>
+    <rect x="53.3" y="138.0" width="10.7" height="34.0" rx="5.4" fill="#FFFFFF" fill-opacity="1.00"/>
+    <rect x="70.6" y="108.0" width="10.7" height="64.0" rx="5.4" fill="#FFFFFF" fill-opacity="1.00"/>
+    <rect x="88.0" y="83.5" width="10.7" height="88.5" rx="5.4" fill="#FFFFFF" fill-opacity="1.00"/>
+    <rect x="105.3" y="67.5" width="10.7" height="104.5" rx="5.4" fill="#FFFFFF" fill-opacity="1.00"/>
+    <rect x="122.6" y="62.0" width="10.7" height="110.0" rx="5.4" fill="#FFFFFF" fill-opacity="1.00"/>
+    <rect x="140.0" y="67.5" width="10.7" height="104.5" rx="5.4" fill="#FFFFFF" fill-opacity="1.00"/>
+    <rect x="157.3" y="83.5" width="10.7" height="88.5" rx="5.4" fill="#FFFFFF" fill-opacity="1.00"/>
+    <rect x="174.6" y="108.0" width="10.7" height="64.0" rx="5.4" fill="#FFFFFF" fill-opacity="1.00"/>
+    <rect x="192.0" y="138.0" width="10.7" height="34.0" rx="5.4" fill="#FFFFFF" fill-opacity="1.00"/>
+    <rect x="38" y="184" width="180" height="14" rx="7" fill="#FFFFFF"/>
+  </g>
+  </g>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif">
+    <text x="266" y="146" font-size="58" font-weight="700" letter-spacing="-1" fill="#18181B">Bitwig Agent Bridge</text>
+    <text x="268" y="192" font-size="24" fill="#5B5B66">Let AI agents compose, arrange and mix in Bitwig Studio.</text>
+    <rect x="268" y="222" width="111" height="32" rx="16" fill="#FFFFFF" stroke="#FF8713" stroke-width="1.5"/><text x="323.5" y="243" text-anchor="middle" font-size="15" font-weight="600" fill="#D9600A">MCP server</text><rect x="389.0" y="222" width="152" height="32" rx="16" fill="#FFFFFF" stroke="#FF8713" stroke-width="1.5"/><text x="464.8" y="243" text-anchor="middle" font-size="15" font-weight="600" fill="#D9600A">Bitwig Studio 6</text><rect x="550.5" y="222" width="70" height="32" rx="16" fill="#FFFFFF" stroke="#FF8713" stroke-width="1.5"/><text x="585.8" y="243" text-anchor="middle" font-size="15" font-weight="600" fill="#D9600A">macOS</text><rect x="631.0" y="222" width="176" height="32" rx="16" fill="#FFFFFF" stroke="#FF8713" stroke-width="1.5"/><text x="718.9" y="243" text-anchor="middle" font-size="15" font-weight="600" fill="#D9600A">Read-back verified</text>
+  </g>
+</svg>
