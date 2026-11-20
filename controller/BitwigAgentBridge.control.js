@@ -25,8 +25,41 @@ var MAX_PRINT_SPAN_BEATS = 1024;
 var BROWSER_PAGE = 128;
 var MAX_BROWSER_RESULTS = 16384;
 var MAX_EFFECT_TRACKS = 32;
+// Note grid of the launcher cursor clip: steps per window and keys (all 128
+// MIDI pitches). Reads and writes scroll this window across the clip.
 var CLIP_GRID_WIDTH = 256;
 var CLIP_GRID_HEIGHT = 128;
+// Grid resolution of note starts, in steps per beat. 4 is a 1/16 grid at 4/4.
+var DEFAULT_STEPS_PER_BEAT = 4;
+var MAX_STEPS_PER_BEAT = 960;
+// Longest clip the note tools read or write, and most notes in one request.
+var MAX_CLIP_BEATS = 512;
+var MAX_CLIP_NOTES = 4096;
+// Most grid steps one request may cover (clip span × stepsPerBeat): 64 grid
+// pages, which bounds a read to about 12 s and a verified write to about 30 s.
+var MAX_GRID_STEPS = 16384;
+// Largest difference per color channel (0..1) that still counts as the
+// requested color: a bit more than one 8-bit step.
+var COLOR_TOLERANCE = 1.5 / 255;
+// Most notes one read_clip reply carries; page with offset for more.
+var MAX_NOTES_PER_REPLY = 300;
+// Per-note expressions the note tools write, with the range each accepts, and
+// how far a read-back value may differ from the requested one. The ranges are
+// the ones Bitwig's NoteStep setters enforce (measured in Bitwig 6.1.7; the
+// API reference does not state them). Pressure is left out on purpose: a value
+// written with NoteStep.setPressure does not persist (it is reset when notes
+// are added, when timbre, pan or gain change, and on later reads).
+var NOTE_EXPRESSIONS = { timbre: [-1, 1], pan: [-1, 1], gain: [0, 1] };
+var NOTE_EXPRESSION_TOLERANCE = 0.001;
+// NoteStep.gain() reports twice the value NoteStep.setGain() takes (measured
+// in Bitwig 6.1.7). Tools use the setter's 0..1 scale both ways.
+var NOTE_GAIN_READ_SCALE = 2;
+// NoteStep setters, in the order they are called.
+var NOTE_SETTER_FIELDS = ["velocity", "duration", "muted", "timbre", "pan", "gain"];
+// Waits that let Bitwig's grid observers catch up after a scroll or a write.
+var NOTE_SCROLL_SETTLE_MS = 60;
+var NOTE_PAGE_SETTLE_MS = 180;
+var CLIP_FOCUS_SETTLE_MS = 160;
 // Largest reply sent back in one datagram. Mirrors MAX_PACKET_BYTES in
 // src/bitwig-client.mjs, which reads replies on a 65536-byte socket buffer.
 var MAX_REPLY_BYTES = 60000;
@@ -1684,163 +1717,6 @@ function handleRenameTrack(request) {
    });
 }
 
-function validateClipNotes(notes, stepSize, lengthBeats) {
-   if (!Array.isArray(notes)) throw new Error("Clip notes must be an array.");
-   if (notes.length > 4096) throw new Error("A Bitwig Agent Bridge clip can contain at most 4096 notes.");
-   var pages = {};
-   var noteCount = 0;
-   for (var i = 0; i < notes.length; i++) {
-      var note = notes[i] || {};
-      var beat = Number(note.beat);
-      var pitch = Number(note.pitch);
-      var velocity = Number(note.velocity === undefined ? 100 : note.velocity);
-      var duration = Number(note.duration === undefined ? stepSize : note.duration);
-      var channel = Number(note.channel === undefined ? 0 : note.channel);
-      var absoluteStep = Math.round(beat / stepSize);
-      if (!(beat >= 0 && beat < lengthBeats) || Math.abs((absoluteStep * stepSize) - beat) > 0.0001) {
-         throw new Error("Note " + i + " must start on the clip step grid and before the clip end.");
-      }
-      if (!(pitch >= 0 && pitch <= 127) || Math.floor(pitch) !== pitch) throw new Error("Note " + i + " has an invalid MIDI pitch.");
-      if (!(velocity >= 1 && velocity <= 127) || Math.floor(velocity) !== velocity) throw new Error("Note " + i + " has an invalid velocity.");
-      if (!(duration > 0 && beat + duration <= lengthBeats + 0.0001)) throw new Error("Note " + i + " has an invalid duration.");
-      if (!(channel >= 0 && channel <= 15) || Math.floor(channel) !== channel) throw new Error("Note " + i + " has an invalid MIDI channel.");
-      var pageStart = Math.floor(absoluteStep / CLIP_GRID_WIDTH) * CLIP_GRID_WIDTH;
-      var key = String(pageStart);
-      if (!pages[key]) pages[key] = [];
-      pages[key].push({
-         channel: channel,
-         x: absoluteStep - pageStart,
-         pitch: pitch,
-         velocity: velocity,
-         duration: duration
-      });
-      noteCount++;
-   }
-   return { pages: pages, pageStarts: Object.keys(pages).map(Number).sort(function(a, b) { return a - b; }), noteCount: noteCount };
-}
-
-function writeClipPages(targetClip, validated, pageIndex, callback) {
-   if (pageIndex >= validated.pageStarts.length) {
-      targetClip.scrollToStep(0);
-      callback();
-      return;
-   }
-   var pageStart = validated.pageStarts[pageIndex];
-   targetClip.scrollToStep(pageStart);
-   later(55, function() {
-      try {
-         var page = validated.pages[String(pageStart)];
-         for (var i = 0; i < page.length; i++) {
-            var note = page[i];
-            targetClip.setStep(note.channel, note.x, note.pitch, note.velocity, note.duration);
-         }
-         writeClipPages(targetClip, validated, pageIndex + 1, callback);
-      } catch (error) {
-         callback(error);
-      }
-   });
-}
-
-// Note-start cells Bitwig reports for the launcher cursor clip's visible grid
-// window, keyed "channel:x:pitch". init() registers onLauncherNoteStep, so the
-// map follows every scroll; reads confirm each cell with getStep() before use.
-var launcherNoteCells = {};
-
-function onLauncherNoteStep(step) {
-   var key = step.channel() + ":" + step.x() + ":" + step.y();
-   if (String(step.state()) === "NoteOn") launcherNoteCells[key] = true;
-   else delete launcherNoteCells[key];
-}
-
-// Reads every note in the launcher cursor clip from beat 0 to lengthBeats.
-// Bitwig only exposes notes through its step grid, so a note that starts
-// between steps comes back at the step it starts in (the result is quantized).
-function readLauncherNotes(lengthBeats, stepSize, callback) {
-   var stepCount = Math.ceil(lengthBeats / stepSize - 0.0001);
-   var notes = [];
-   launcherClip.setStepSize(stepSize);
-   launcherClip.scrollToKey(0);
-
-   function readPage(pageStart) {
-      if (pageStart >= stepCount) {
-         launcherClip.scrollToStep(0);
-         notes.sort(function(a, b) { return a.beat - b.beat || a.pitch - b.pitch || a.channel - b.channel; });
-         callback(null, notes);
-         return;
-      }
-      launcherClip.scrollToStep(pageStart);
-      later(180, function() {
-         try {
-            var keys = Object.keys(launcherNoteCells);
-            for (var i = 0; i < keys.length; i++) {
-               var parts = keys[i].split(":");
-               var channel = Number(parts[0]);
-               var x = Number(parts[1]);
-               var pitch = Number(parts[2]);
-               if (pageStart + x >= stepCount) continue;
-               var step = launcherClip.getStep(channel, x, pitch);
-               if (String(step.state()) !== "NoteOn") continue;
-               notes.push({
-                  beat: Math.round((pageStart + x) * stepSize * 1000000) / 1000000,
-                  pitch: pitch,
-                  velocity: Math.max(1, Math.min(127, Math.round(step.velocity() * 127))),
-                  duration: step.duration(),
-                  channel: channel,
-                  muted: step.isMuted()
-               });
-            }
-            readPage(pageStart + CLIP_GRID_WIDTH);
-         } catch (error) {
-            callback(error);
-         }
-      });
-   }
-
-   readPage(0);
-}
-
-// Compares a clip's read-back notes with the validated notes that were written
-// and returns one line per difference: missing, changed, or unexpected notes.
-function compareWrittenNotes(validated, stepSize, actual) {
-   var expected = [];
-   for (var i = 0; i < validated.pageStarts.length; i++) {
-      var pageStart = validated.pageStarts[i];
-      var page = validated.pages[String(pageStart)];
-      for (var j = 0; j < page.length; j++) {
-         var note = page[j];
-         expected.push({ step: pageStart + note.x, pitch: note.pitch, velocity: note.velocity, duration: note.duration, channel: note.channel });
-      }
-   }
-   var byCell = {};
-   for (var k = 0; k < actual.length; k++) {
-      var key = actual[k].channel + ":" + Math.round(actual[k].beat / stepSize) + ":" + actual[k].pitch;
-      byCell[key] = actual[k];
-   }
-   var problems = [];
-   for (var m = 0; m < expected.length; m++) {
-      var want = expected[m];
-      var cell = want.channel + ":" + want.step + ":" + want.pitch;
-      var label = "pitch " + want.pitch + " at beat " + (want.step * stepSize) + " (channel " + want.channel + ")";
-      var got = byCell[cell];
-      if (!got || got.used) {
-         problems.push(label + " is missing");
-         continue;
-      }
-      got.used = true;
-      var diffs = [];
-      if (got.velocity !== want.velocity) diffs.push("velocity is " + got.velocity + ", requested " + want.velocity);
-      if (Math.abs(got.duration - want.duration) > 0.001) diffs.push("duration is " + got.duration + ", requested " + want.duration);
-      if (got.muted) diffs.push("note is muted");
-      if (diffs.length) problems.push(label + ": " + diffs.join(", "));
-   }
-   for (var n = 0; n < actual.length; n++) {
-      if (!actual[n].used) {
-         problems.push("unexpected pitch " + actual[n].pitch + " at beat " + actual[n].beat + " (channel " + actual[n].channel + ")");
-      }
-   }
-   return { expectedCount: expected.length, problems: problems };
-}
-
 // Bitwig shows MAX_SCENES launcher slots at a time. This scrolls that window
 // until slotIndex is in view and calls callback(item, localIndex), where item
 // is the track's slot, or the scene when track is null. The window goes back to
@@ -1888,16 +1764,585 @@ function requireSlotIndex(value, label) {
    return slotIndex;
 }
 
-function handleCreateNoteClip(request) {
+// ------------------------------------------------------------ clips & notes
+//
+// Bitwig exposes clip notes only through a step grid: a window of
+// CLIP_GRID_WIDTH steps by CLIP_GRID_HEIGHT keys on the launcher cursor clip,
+// scrolled across the clip. A note is addressed by the grid cell its start
+// falls in (channel, step, pitch). A note that starts between two steps reads
+// back at the step it starts in, so off-grid timing survives only when the
+// clip is read and written with a fine enough grid (stepsPerBeat).
+
+// Note-start cells Bitwig reports for the launcher cursor clip's visible grid
+// window, keyed "channel:x:pitch". init() registers onLauncherNoteStep, so the
+// map follows every scroll; reads confirm each cell with getStep() before use.
+var launcherNoteCells = {};
+
+function onLauncherNoteStep(step) {
+   var key = step.channel() + ":" + step.x() + ":" + step.y();
+   if (String(step.state()) === "NoteOn") launcherNoteCells[key] = true;
+   else delete launcherNoteCells[key];
+}
+
+function roundTo(value, digits) {
+   var factor = Math.pow(10, digits);
+   return Math.round(Number(value) * factor) / factor;
+}
+
+function requireStepsPerBeat(value) {
+   var stepsPerBeat = value === undefined || value === null ? DEFAULT_STEPS_PER_BEAT : Number(value);
+   if (!(stepsPerBeat >= 1 && stepsPerBeat <= MAX_STEPS_PER_BEAT) || Math.floor(stepsPerBeat) !== stepsPerBeat) {
+      throw new Error("stepsPerBeat must be a whole number from 1 to " + MAX_STEPS_PER_BEAT + ".");
+   }
+   return stepsPerBeat;
+}
+
+function requireBeats(value, label, allowZero) {
+   var beats = Number(value);
+   if (!(allowZero ? beats >= 0 : beats > 0) || beats > MAX_CLIP_BEATS) {
+      throw new Error(label + " must be " + (allowZero ? "from 0" : "greater than 0") + " to " + MAX_CLIP_BEATS + " beats.");
+   }
+   return beats;
+}
+
+function requireGridSpan(endBeats, stepsPerBeat) {
+   if (endBeats * stepsPerBeat > MAX_GRID_STEPS) {
+      throw new Error("A clip span of " + roundTo(endBeats, 6) + " beats at " + stepsPerBeat + " steps per beat is " +
+         Math.ceil(endBeats * stepsPerBeat) + " grid steps, over the " + MAX_GRID_STEPS + "-step limit. Use a smaller stepsPerBeat.");
+   }
+}
+
+function parseHexColor(value, label) {
+   var match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(value || ""));
+   if (!match) throw new Error(label + " must be a #RRGGBB color.");
+   return {
+      hex: "#" + match.slice(1).join("").toUpperCase(),
+      red: parseInt(match[1], 16) / 255,
+      green: parseInt(match[2], 16) / 255,
+      blue: parseInt(match[3], 16) / 255
+   };
+}
+
+function colorHex(colorValue) {
+   function channel(component) {
+      var hex = Math.max(0, Math.min(255, Math.round(Number(component) * 255))).toString(16).toUpperCase();
+      return hex.length < 2 ? "0" + hex : hex;
+   }
+   return "#" + channel(colorValue.red()) + channel(colorValue.green()) + channel(colorValue.blue());
+}
+
+// Bitwig stores colors with slightly less than 8-bit precision per channel
+// (#E0A030 reads back as #E0A02F), so one step per channel counts as equal.
+function sameColor(colorValue, requested) {
+   return Math.abs(colorValue.red() - requested.red) <= COLOR_TOLERANCE &&
+      Math.abs(colorValue.green() - requested.green) <= COLOR_TOLERANCE &&
+      Math.abs(colorValue.blue() - requested.blue) <= COLOR_TOLERANCE;
+}
+
+function noteCell(channel, step, pitch) {
+   return channel + ":" + step + ":" + pitch;
+}
+
+function noteLabel(note, stepsPerBeat) {
+   return "pitch " + note.pitch + " at beat " + roundTo(note.step / stepsPerBeat, 6) + " (channel " + note.channel + ")";
+}
+
+// Validates one requested note. Returns its grid cell and only the fields the
+// request set; defaults are the caller's business, because an update keeps
+// the fields it does not name.
+function parseNote(note, index, stepsPerBeat, endBeats, requireAll) {
+   note = note || {};
+   var beat = Number(note.beat);
+   var pitch = Number(note.pitch);
+   var channel = note.channel === undefined ? 0 : Number(note.channel);
+   var step = Math.round(beat * stepsPerBeat);
+   var where = "Note " + index + " (pitch " + note.pitch + " at beat " + note.beat + ")";
+   if (!(beat >= 0 && beat < endBeats)) throw new Error(where + " must start between beat 0 and the clip end at beat " + endBeats + ".");
+   if (Math.abs(step / stepsPerBeat - beat) > 0.000001) {
+      throw new Error(where + " does not start on the 1/" + stepsPerBeat + "-beat grid. Use a larger stepsPerBeat.");
+   }
+   if (!(pitch >= 0 && pitch <= 127) || Math.floor(pitch) !== pitch) throw new Error(where + " has an invalid MIDI pitch.");
+   if (!(channel >= 0 && channel <= 15) || Math.floor(channel) !== channel) throw new Error(where + " has an invalid MIDI channel.");
+   var parsed = { step: step, pitch: pitch, channel: channel, fields: {} };
+   if (note.velocity !== undefined) {
+      var velocity = Number(note.velocity);
+      if (!(velocity >= 1 && velocity <= 127) || Math.floor(velocity) !== velocity) throw new Error(where + " has an invalid velocity.");
+      parsed.fields.velocity = velocity;
+   }
+   if (note.duration !== undefined) {
+      var duration = Number(note.duration);
+      if (!(duration > 0 && beat + duration <= endBeats + 0.000001)) {
+         throw new Error(where + " needs a duration greater than 0 that ends by the clip end at beat " + endBeats + ".");
+      }
+      parsed.fields.duration = duration;
+   } else if (requireAll) {
+      throw new Error(where + " needs a duration.");
+   }
+   for (var name in NOTE_EXPRESSIONS) {
+      if (note[name] === undefined) continue;
+      var range = NOTE_EXPRESSIONS[name];
+      var amount = Number(note[name]);
+      if (!(amount >= range[0] && amount <= range[1])) throw new Error(where + " has " + name + " " + note[name] + "; it must be from " + range[0] + " to " + range[1] + ".");
+      parsed.fields[name] = amount;
+   }
+   if (note.muted !== undefined) parsed.fields.muted = Boolean(note.muted);
+   return parsed;
+}
+
+function parseNoteList(notes, stepsPerBeat, endBeats, requireAll) {
+   if (!Array.isArray(notes)) throw new Error("Notes must be an array.");
+   if (notes.length > MAX_CLIP_NOTES) throw new Error("A request can contain at most " + MAX_CLIP_NOTES + " notes.");
+   var parsed = [];
+   var seen = {};
+   for (var i = 0; i < notes.length; i++) {
+      var note = parseNote(notes[i], i, stepsPerBeat, endBeats, requireAll);
+      var cell = noteCell(note.channel, note.step, note.pitch);
+      if (seen[cell] !== undefined) {
+         throw new Error("Notes " + seen[cell] + " and " + i + " both start at " + noteLabel(note, stepsPerBeat) + "; Bitwig keeps one note per grid cell.");
+      }
+      seen[cell] = i;
+      parsed.push(note);
+   }
+   return parsed;
+}
+
+// Reads every note in the launcher cursor clip that starts before endBeats.
+function readClipNotes(stepsPerBeat, endBeats, callback) {
+   var stepCount = Math.ceil(endBeats * stepsPerBeat - 0.000001);
+   var notes = [];
+   launcherClip.setStepSize(1 / stepsPerBeat);
+   launcherClip.scrollToKey(0);
+
+   function readPage(pageStart) {
+      if (pageStart >= stepCount) {
+         launcherClip.scrollToStep(0);
+         notes.sort(function(a, b) { return a.step - b.step || a.pitch - b.pitch || a.channel - b.channel; });
+         callback(null, notes);
+         return;
+      }
+      launcherClip.scrollToStep(pageStart);
+      later(NOTE_PAGE_SETTLE_MS, function() {
+         try {
+            var keys = Object.keys(launcherNoteCells);
+            for (var i = 0; i < keys.length; i++) {
+               var parts = keys[i].split(":");
+               var channel = Number(parts[0]);
+               var x = Number(parts[1]);
+               var pitch = Number(parts[2]);
+               if (pageStart + x >= stepCount) continue;
+               var step = launcherClip.getStep(channel, x, pitch);
+               if (String(step.state()) !== "NoteOn") continue;
+               notes.push(noteFromStep(step, pageStart + x, stepsPerBeat));
+            }
+            readPage(pageStart + CLIP_GRID_WIDTH);
+         } catch (error) {
+            callback(error);
+         }
+      });
+   }
+
+   readPage(0);
+}
+
+function noteFromStep(step, absoluteStep, stepsPerBeat) {
+   return {
+      step: absoluteStep,
+      beat: roundTo(absoluteStep / stepsPerBeat, 6),
+      pitch: step.y(),
+      channel: step.channel(),
+      velocity: Math.max(1, Math.min(127, Math.round(step.velocity() * 127))),
+      duration: roundTo(step.duration(), 6),
+      timbre: roundTo(step.timbre(), 4),
+      pan: roundTo(step.pan(), 4),
+      gain: roundTo(step.gain() / NOTE_GAIN_READ_SCALE, 4),
+      muted: step.isMuted()
+   };
+}
+
+// Notes as tools return them: without the internal step number.
+function publicNotes(notes) {
+   var result = [];
+   for (var i = 0; i < notes.length; i++) {
+      var note = notes[i];
+      result.push({
+         beat: note.beat, pitch: note.pitch, channel: note.channel, velocity: note.velocity, duration: note.duration,
+         timbre: note.timbre, pan: note.pan, gain: note.gain, muted: note.muted
+      });
+   }
+   return result;
+}
+
+// Compares the notes Bitwig holds with the notes expected after a change.
+// Every field an expected note carries must match; notes nobody asked for
+// count as unexpected. Returns one line per difference.
+function compareNotes(expected, actual, stepsPerBeat) {
+   var byCell = {};
+   for (var a = 0; a < actual.length; a++) byCell[noteCell(actual[a].channel, actual[a].step, actual[a].pitch)] = actual[a];
+   var used = {};
+   var problems = [];
+   for (var e = 0; e < expected.length; e++) {
+      var want = expected[e];
+      var cell = noteCell(want.channel, want.step, want.pitch);
+      var got = byCell[cell];
+      if (!got) {
+         problems.push(noteLabel(want, stepsPerBeat) + " is missing");
+         continue;
+      }
+      used[cell] = true;
+      var diffs = [];
+      for (var field in want.fields) {
+         var requested = want.fields[field];
+         var held = got[field];
+         var tolerance = field === "duration" ? 0.0001 : NOTE_EXPRESSIONS[field] ? NOTE_EXPRESSION_TOLERANCE : 0;
+         var same = typeof requested === "boolean" ? held === requested : Math.abs(Number(held) - requested) <= tolerance;
+         if (!same) {
+            diffs.push(field === "muted"
+               ? (requested ? "note is not muted" : "note is muted")
+               : field + " is " + held + ", requested " + requested);
+         }
+      }
+      if (diffs.length) problems.push(noteLabel(want, stepsPerBeat) + ": " + diffs.join(", "));
+   }
+   for (var u = 0; u < actual.length; u++) {
+      var extra = actual[u];
+      if (!used[noteCell(extra.channel, extra.step, extra.pitch)]) problems.push("unexpected " + noteLabel(extra, stepsPerBeat));
+   }
+   return problems;
+}
+
+function describeProblems(problems) {
+   var shown = problems.slice(0, 5).join("; ");
+   return shown + (problems.length > 5 ? "; and " + (problems.length - 5) + " more" : "") + ".";
+}
+
+// Applies note operations. Each operation is one of
+//   { kind: "create", step, pitch, channel, fields }   new note (setStep)
+//   { kind: "update", step, pitch, channel, fields }   change an existing note
+//   { kind: "remove", step, pitch, channel }           delete a note
+// It runs in two passes over the grid pages: removes and creates first, then
+// the NoteStep setters once Bitwig shows the new notes on the grid.
+function applyNoteOperations(operations, stepsPerBeat, callback) {
+   var pages = {};
+   for (var i = 0; i < operations.length; i++) {
+      var operation = operations[i];
+      var pageStart = Math.floor(operation.step / CLIP_GRID_WIDTH) * CLIP_GRID_WIDTH;
+      if (!pages[pageStart]) pages[pageStart] = [];
+      pages[pageStart].push(operation);
+   }
+   var pageStarts = Object.keys(pages).map(Number).sort(function(a, b) { return a - b; });
+
+   function writeGrid(page, pageStart) {
+      for (var p = 0; p < page.length; p++) {
+         var op = page[p];
+         var x = op.step - pageStart;
+         if (op.kind === "remove") launcherClip.clearStep(op.channel, x, op.pitch);
+         else if (op.kind === "create") launcherClip.setStep(op.channel, x, op.pitch, op.fields.velocity, op.fields.duration);
+      }
+   }
+
+   function setFields(fields) {
+      return function(page, pageStart) {
+         for (var q = 0; q < page.length; q++) {
+            var change = page[q];
+            if (change.kind === "remove") continue;
+            var setters = noteSetterFields(change, fields);
+            if (!setters.length) continue;
+            var step = launcherClip.getStep(change.channel, change.step - pageStart, change.pitch);
+            if (String(step.state()) !== "NoteOn") {
+               throw new Error("Bitwig shows no note at pitch " + change.pitch + ", step " + change.step + " (channel " + change.channel + ") to set " + setters.join(", ") + " on.");
+            }
+            for (var s = 0; s < setters.length; s++) setNoteField(step, setters[s], change.fields[setters[s]]);
+         }
+      };
+   }
+
+   // Runs `action` on every page in turn, waiting `settleMs` after each
+   // scroll so Bitwig's grid shows that page, then calls next().
+   function eachPage(settleMs, action, next) {
+      function run(index) {
+         if (index >= pageStarts.length) {
+            next();
+            return;
+         }
+         var pageStart = pageStarts[index];
+         launcherClip.scrollToStep(pageStart);
+         later(settleMs, function() {
+            try {
+               action(pages[pageStart], pageStart);
+               run(index + 1);
+            } catch (error) {
+               callback(error);
+            }
+         });
+      }
+      run(0);
+   }
+
+   function done() {
+      launcherClip.scrollToStep(0);
+      callback(null);
+   }
+
+   launcherClip.setStepSize(1 / stepsPerBeat);
+   launcherClip.scrollToKey(0);
+   eachPage(NOTE_SCROLL_SETTLE_MS, writeGrid, function() {
+      later(NOTE_PAGE_SETTLE_MS, function() {
+         eachPage(NOTE_PAGE_SETTLE_MS, setFields(NOTE_SETTER_FIELDS), done);
+      });
+   });
+}
+
+// The fields among `allowed` that need a NoteStep setter: all of them on an
+// update; on a new note only those setStep did not write and that differ from
+// Bitwig's defaults.
+function noteSetterFields(operation, allowed) {
+   var names = [];
+   for (var i = 0; i < allowed.length; i++) {
+      var field = allowed[i];
+      if (operation.fields[field] === undefined) continue;
+      if (operation.kind === "create") {
+         if (field === "velocity" || field === "duration") continue;
+         if (field === "muted" ? !operation.fields.muted : operation.fields[field] === 0) continue;
+      }
+      names.push(field);
+   }
+   return names;
+}
+
+// Bitwig's script host only supports direct method calls on these objects, so
+// each setter is spelled out.
+function setNoteField(step, field, value) {
+   if (field === "velocity") step.setVelocity(value / 127);
+   else if (field === "duration") step.setDuration(value);
+   else if (field === "timbre") step.setTimbre(value);
+   else if (field === "pan") step.setPan(value);
+   else if (field === "gain") step.setGain(value);
+   else if (field === "muted") step.setIsMuted(value);
+   else throw new Error("Unknown note field " + field + ".");
+}
+
+// Clip length is reported and set through the loop only: Clip.getPlayStart()
+// and getPlayStop() do not follow loop changes consistently (measured in
+// Bitwig 6.1.7: moving the loop start to beat 2 made them read 8 and 10).
+function clipState(slot, slotIndex) {
+   return {
+      slotIndex: slotIndex,
+      name: slot.name().get(),
+      color: colorHex(launcherClip.color()),
+      loop: {
+         enabled: launcherClip.isLoopEnabled().get(),
+         startBeats: roundTo(launcherClip.getLoopStart().get(), 6),
+         lengthBeats: roundTo(launcherClip.getLoopLength().get(), 6)
+      },
+      playing: slot.isPlaying().get()
+   };
+}
+
+// Where note reads stop: the loop end, or Bitwig's play-stop value when that
+// is later, so notes outside the loop are read too. Capped at MAX_CLIP_BEATS.
+function clipEndBeats() {
+   var end = Math.max(launcherClip.getPlayStop().get(), launcherClip.getLoopStart().get() + launcherClip.getLoopLength().get());
+   return Math.min(MAX_CLIP_BEATS, end);
+}
+
+// Validates name, loop and color from a request. Returns the properties to
+// write, or null when the request sets none.
+function parseClipProperties(params) {
+   var properties = {};
+   var any = false;
+   if (params.name !== undefined) {
+      var name = String(params.name).trim();
+      if (!name || name.length > 120) throw new Error("Clip name must contain 1 to 120 characters.");
+      properties.name = name;
+      any = true;
+   }
+   if (params.loop !== undefined) {
+      var loop = params.loop || {};
+      properties.loop = {};
+      if (loop.enabled !== undefined) properties.loop.enabled = Boolean(loop.enabled);
+      if (loop.startBeats !== undefined) properties.loop.startBeats = requireBeats(loop.startBeats, "Loop start", true);
+      if (loop.lengthBeats !== undefined) properties.loop.lengthBeats = requireBeats(loop.lengthBeats, "Loop length");
+      any = true;
+   }
+   if (params.color !== undefined) {
+      properties.color = parseHexColor(params.color, "Clip color");
+      any = true;
+   }
+   return any ? properties : null;
+}
+
+function writeClipProperties(properties) {
+   if (properties.name !== undefined) launcherClip.setName(properties.name);
+   if (properties.loop) {
+      if (properties.loop.startBeats !== undefined) launcherClip.getLoopStart().set(properties.loop.startBeats);
+      if (properties.loop.lengthBeats !== undefined) launcherClip.getLoopLength().set(properties.loop.lengthBeats);
+      if (properties.loop.enabled !== undefined) launcherClip.isLoopEnabled().set(properties.loop.enabled);
+   }
+   if (properties.color) launcherClip.color().set(properties.color.red, properties.color.green, properties.color.blue);
+}
+
+function clipPropertyProblems(properties, slot) {
+   var problems = [];
+   function beats(label, actual, requested) {
+      if (differs(actual, requested, 0.0001)) problems.push(label + " is " + roundTo(actual, 6) + ", requested " + requested);
+   }
+   if (properties.name !== undefined && slot.name().get() !== properties.name) {
+      problems.push("name is ‘" + slot.name().get() + "’, requested ‘" + properties.name + "’");
+   }
+   if (properties.loop) {
+      if (properties.loop.enabled !== undefined && launcherClip.isLoopEnabled().get() !== properties.loop.enabled) {
+         problems.push("loop.enabled is " + launcherClip.isLoopEnabled().get() + ", requested " + properties.loop.enabled);
+      }
+      if (properties.loop.startBeats !== undefined) beats("loop.startBeats", launcherClip.getLoopStart().get(), properties.loop.startBeats);
+      if (properties.loop.lengthBeats !== undefined) beats("loop.lengthBeats", launcherClip.getLoopLength().get(), properties.loop.lengthBeats);
+   }
+   if (properties.color && !sameColor(launcherClip.color(), properties.color)) {
+      problems.push("color is " + colorHex(launcherClip.color()) + ", requested " + properties.color.hex);
+   }
+   return problems;
+}
+
+// Puts the clip in a track's launcher slot into Bitwig's launcher cursor clip
+// and calls back once Bitwig reports it there.
+function focusClip(request, slot, slotIndex, callback) {
+   slot.select();
+   slot.showInEditor();
+   var attempts = 0;
+   function check() {
+      try {
+         if (!slot.isSelected().get() || !launcherClip.exists().get()) {
+            if (attempts++ < 10) {
+               later(80, check);
+               return;
+            }
+            throw new Error("Bitwig did not expose the launcher clip in slot " + slotIndex + ".");
+         }
+         // Give the clip's loop and grid observers one more cycle to follow
+         // the newly selected clip before anything reads them.
+         later(CLIP_FOCUS_SETTLE_MS, function() {
+            try {
+               callback();
+            } catch (error) {
+               finish(request, false, { message: String(error.message || error) });
+            }
+         });
+      } catch (error) {
+         finish(request, false, { message: String(error.message || error) });
+      }
+   }
+   later(80, check);
+}
+
+// Reads the clip back after a change and fails with every difference from the
+// expected notes and clip properties.
+function verifyClip(request, slot, slotIndex, stepsPerBeat, endBeats, expected, properties, onVerified) {
+   later(NOTE_PAGE_SETTLE_MS, function() {
+      readClipNotes(stepsPerBeat, endBeats, function(error, actual) {
+         if (error) {
+            finish(request, false, { message: "Could not read the clip back after the change: " + String(error.message || error) });
+            return;
+         }
+         var problems = compareNotes(expected, actual, stepsPerBeat);
+         if (problems.length) {
+            finish(request, false, {
+               message: "Note verification failed: clip slot " + slotIndex + " does not hold the " + expected.length + " expected notes. " + describeProblems(problems)
+            });
+            return;
+         }
+         if (!properties) {
+            onVerified(actual);
+            return;
+         }
+         verifyReadback(request, function() {
+            return clipPropertyProblems(properties, slot).join("; ");
+         }, function() {
+            onVerified(actual);
+         });
+      });
+   });
+}
+
+// Bitwig stopped part-way through a change. Reads the clip back so the error
+// says exactly how it now differs from the request.
+function failWithClipState(request, error, slotIndex, stepsPerBeat, endBeats, expected) {
+   var message = "Bitwig stopped the change part-way: " + String(error.message || error);
+   later(NOTE_PAGE_SETTLE_MS, function() {
+      readClipNotes(stepsPerBeat, endBeats, function(readError, actual) {
+         if (readError) {
+            finish(request, false, { message: message + " The clip could not be read back afterwards." });
+            return;
+         }
+         var problems = compareNotes(expected, actual, stepsPerBeat);
+         finish(request, false, {
+            message: message + (problems.length
+               ? " Clip slot " + slotIndex + " now differs from the request: " + describeProblems(problems)
+               : " Clip slot " + slotIndex + " nevertheless matches the request.")
+         });
+      });
+   });
+}
+
+function handleReadClip(request) {
    var params = request.params;
    var slotIndex = requireSlotIndex(params.slotIndex, "Clip");
-   var lengthBeats = Number(params.lengthBeats);
-   var stepSize = Number(params.stepSize || 0.25);
-   if (!(lengthBeats >= 1 && lengthBeats <= 512) || Math.floor(lengthBeats) !== lengthBeats) {
-      throw new Error("Clip length must be a whole number from 1 to 512 beats.");
+   var stepsPerBeat = requireStepsPerBeat(params.stepsPerBeat);
+   var offset = Math.max(0, Math.floor(Number(params.offset || 0)));
+   var limit = Math.max(1, Math.min(MAX_NOTES_PER_REPLY, Math.floor(Number(params.limit || MAX_NOTES_PER_REPLY))));
+
+   selectTrack(request, params, function(track) {
+      withSceneSlot(request, track, slotIndex, function(slot) {
+         if (!slot.hasContent().get()) throw new Error("Clip slot " + slotIndex + " has no clip.");
+         focusClip(request, slot, slotIndex, function() {
+            var endBeats = clipEndBeats();
+            if (!(endBeats > 0)) throw new Error("Bitwig reports no length for the clip in slot " + slotIndex + ".");
+            requireGridSpan(endBeats, stepsPerBeat);
+            var state = clipState(slot, slotIndex);
+            readClipNotes(stepsPerBeat, endBeats, function(error, notes) {
+               if (error) {
+                  finish(request, false, { message: String(error.message || error) });
+                  return;
+               }
+               finish(request, true, {
+                  track: { index: params.trackIndex, name: params.trackName },
+                  clip: state,
+                  stepsPerBeat: stepsPerBeat,
+                  note: "Note starts are read on a 1/" + stepsPerBeat + "-beat grid; a note between two steps reads back at the step it starts in.",
+                  noteCount: notes.length,
+                  offset: offset,
+                  returned: Math.max(0, Math.min(limit, notes.length - offset)),
+                  notes: publicNotes(notes.slice(offset, offset + limit))
+               });
+            });
+         });
+      });
+   });
+}
+
+// Creates or replaces a launcher clip, writes its properties and all of its
+// notes, and verifies the whole clip.
+function handleWriteClip(request) {
+   var params = request.params;
+   var slotIndex = requireSlotIndex(params.slotIndex, "Clip");
+   var stepsPerBeat = requireStepsPerBeat(params.stepsPerBeat);
+   var lengthBeats = requireBeats(params.lengthBeats, "Clip length");
+   var properties = parseClipProperties({
+      name: params.name,
+      loop: {
+         enabled: params.loop && params.loop.enabled !== undefined ? params.loop.enabled : true,
+         startBeats: params.loop && params.loop.startBeats !== undefined ? params.loop.startBeats : 0,
+         lengthBeats: params.loop && params.loop.lengthBeats !== undefined ? params.loop.lengthBeats : lengthBeats
+      },
+      color: params.color
+   });
+   requireGridSpan(Math.max(lengthBeats, properties.loop.startBeats + properties.loop.lengthBeats), stepsPerBeat);
+   var notes = parseNoteList(params.notes || [], stepsPerBeat, lengthBeats, true);
+   var operations = [];
+   for (var i = 0; i < notes.length; i++) {
+      var note = notes[i];
+      if (note.fields.velocity === undefined) note.fields.velocity = 100;
+      if (note.fields.muted === undefined) note.fields.muted = false;
+      operations.push({ kind: "create", step: note.step, pitch: note.pitch, channel: note.channel, fields: note.fields });
    }
-   if (!(stepSize >= 0.03125 && stepSize <= 4)) throw new Error("Clip step size must be between 1/128 and 4 beats.");
-   var validated = validateClipNotes(params.notes || [], stepSize, lengthBeats);
 
    selectTrack(request, params, function(track) {
       var sceneCount = sceneBank.itemCount().get();
@@ -1905,11 +2350,34 @@ function handleCreateNoteClip(request) {
          throw new Error("Slot " + slotIndex + " is past the end of the launcher. The project has " + sceneCount +
             " scenes, so a new clip can go in slot " + sceneCount + " at most.");
       }
-      if (slotIndex === sceneCount) {
-         createInNewScene(request, track, slotIndex, lengthBeats, function() {
-            withSceneSlot(request, track, slotIndex, function(slot) {
-               fillNewClip(request, params, slot, slotIndex, lengthBeats, stepSize, validated);
+      // Bitwig creates clips with whole-beat lengths; the exact length is set
+      // with the other clip properties.
+      var creationBeats = Math.ceil(lengthBeats);
+      function fill(slot) {
+         later(180, function() {
+            focusClip(request, slot, slotIndex, function() {
+               writeClipProperties(properties);
+               applyNoteOperations(operations, stepsPerBeat, function(error) {
+                  if (error) {
+                     failWithClipState(request, error, slotIndex, stepsPerBeat, lengthBeats, notes);
+                     return;
+                  }
+                  verifyClip(request, slot, slotIndex, stepsPerBeat, Math.max(lengthBeats, properties.loop.startBeats + properties.loop.lengthBeats), notes, properties, function(actual) {
+                     finish(request, true, {
+                        track: { index: params.trackIndex, name: params.trackName },
+                        clip: clipState(slot, slotIndex),
+                        stepsPerBeat: stepsPerBeat,
+                        notesWritten: notes.length,
+                        notesVerified: actual.length
+                     });
+                  });
+               });
             });
+         });
+      }
+      if (slotIndex === sceneCount) {
+         createInNewScene(request, track, slotIndex, creationBeats, function() {
+            withSceneSlot(request, track, slotIndex, fill);
          });
          return;
       }
@@ -1919,16 +2387,14 @@ function handleCreateNoteClip(request) {
                if (slot.hasContent().get() && !params.replace) {
                   throw new Error("Clip slot " + slotIndex + " already has content. Pass replace=true to replace it.");
                }
-
-               function createClip() {
-                  slot.createEmptyClip(lengthBeats);
-                  fillNewClip(request, params, slot, slotIndex, lengthBeats, stepSize, validated);
+               function create() {
+                  slot.createEmptyClip(creationBeats);
+                  fill(slot);
                }
-
                if (slot.hasContent().get()) {
                   slot.deleteObject();
-                  later(180, createClip);
-               } else createClip();
+                  later(180, create);
+               } else create();
             } catch (error) {
                finish(request, false, { message: String(error.message || error) });
             }
@@ -1953,114 +2419,127 @@ function createInNewScene(request, track, slotIndex, lengthBeats, callback) {
    later(50, waitForScene);
 }
 
-// Selects a freshly created clip, writes its settings and notes, and reads
-// every note back.
-function fillNewClip(request, params, slot, slotIndex, lengthBeats, stepSize, validated) {
-   later(180, function() {
-      try {
-         slot.select();
-         later(180, function() {
-            try {
-               if (!launcherClip.exists().get()) throw new Error("Bitwig did not expose the new launcher clip.");
-               launcherClip.setStepSize(stepSize);
-               launcherClip.scrollToKey(0);
-               launcherClip.scrollToStep(0);
-               launcherClip.setName(String(params.clipName));
-               launcherClip.getLoopStart().set(0);
-               launcherClip.getLoopLength().set(lengthBeats);
-               launcherClip.getPlayStart().set(0);
-               launcherClip.getPlayStop().set(lengthBeats);
-               launcherClip.isLoopEnabled().set(true);
-               writeClipPages(launcherClip, validated, 0, function(error) {
-                  if (error) {
-                     finish(request, false, { message: String(error.message || error) });
-                     return;
-                  }
-                  later(280, function() {
-                     try {
-                        var snapshot = clipSnapshot(slot, slotIndex);
-                        if (!snapshot.hasContent) throw new Error("Bitwig did not confirm clip content.");
-                        readLauncherNotes(lengthBeats, stepSize, function(readError, actual) {
-                           if (readError) {
-                              finish(request, false, { message: "Could not read the clip back after writing: " + String(readError.message || readError) });
-                              return;
-                           }
-                           var check = compareWrittenNotes(validated, stepSize, actual);
-                           if (check.problems.length) {
-                              var shown = check.problems.slice(0, 5).join("; ");
-                              var more = check.problems.length > 5 ? "; and " + (check.problems.length - 5) + " more" : "";
-                              finish(request, false, {
-                                 message: "Note verification failed: clip slot " + slotIndex + " does not match the " + check.expectedCount + " requested notes after writing. " + shown + more + "."
-                              });
-                              return;
-                           }
-                           finish(request, true, {
-                              track: { index: params.trackIndex, name: params.trackName },
-                              clip: clipSnapshot(slot, slotIndex),
-                              lengthBeats: launcherClip.getLoopLength().get(),
-                              stepSize: stepSize,
-                              notesWritten: validated.noteCount,
-                              notesVerified: actual.length
-                           });
-                        });
-                     } catch (verificationError) {
-                        finish(request, false, { message: String(verificationError.message || verificationError) });
-                     }
-                  });
-               });
-            } catch (error) {
-               finish(request, false, { message: String(error.message || error) });
-            }
-         });
-      } catch (error) {
-         finish(request, false, { message: String(error.message || error) });
-      }
-   });
-}
-
-function handleClipNotes(request) {
+// Changes an existing clip: its properties and single notes. Notes the
+// request does not touch must come back unchanged.
+function handleEditClip(request) {
    var params = request.params;
    var slotIndex = requireSlotIndex(params.slotIndex, "Clip");
-   var stepSize = Number(params.stepSize || 0.25);
-   if (!(stepSize >= 0.03125 && stepSize <= 4)) throw new Error("Clip step size must be between 1/128 and 4 beats.");
+   var stepsPerBeat = requireStepsPerBeat(params.stepsPerBeat);
+   var properties = parseClipProperties(params);
+   var upserts = params.setNotes || [];
+   var removals = params.removeNotes || [];
+   if (!properties && !upserts.length && !removals.length) {
+      throw new Error("Nothing to change: pass clip properties, setNotes or removeNotes.");
+   }
 
    selectTrack(request, params, function(track) {
       withSceneSlot(request, track, slotIndex, function(slot) {
          if (!slot.hasContent().get()) throw new Error("Clip slot " + slotIndex + " has no clip.");
-         slot.select();
-         slot.showInEditor();
-         later(240, function() {
-            try {
-               if (!launcherClip.exists().get()) throw new Error("Bitwig did not expose the launcher clip in slot " + slotIndex + ".");
-               var loopStart = launcherClip.getLoopStart().get();
-               var loopLength = launcherClip.getLoopLength().get();
-               var lengthBeats = loopStart + loopLength;
-               if (!(lengthBeats > 0 && lengthBeats <= 512)) {
-                  throw new Error("Clips must end within 512 beats to be read; this one ends at beat " + lengthBeats + ".");
-               }
-               readLauncherNotes(lengthBeats, stepSize, function(error, notes) {
-                  if (error) {
-                     finish(request, false, { message: String(error.message || error) });
-                     return;
-                  }
-                  finish(request, true, {
-                     track: { index: params.trackIndex, name: params.trackName },
-                     clip: clipSnapshot(slot, slotIndex),
-                     lengthBeats: lengthBeats,
-                     loopStartBeats: loopStart,
-                     loopLengthBeats: loopLength,
-                     stepSize: stepSize,
-                     quantized: true,
-                     noteCount: notes.length,
-                     notes: notes
-                  });
-               });
-            } catch (error) {
-               finish(request, false, { message: String(error.message || error) });
+         focusClip(request, slot, slotIndex, function() {
+            var endBefore = clipEndBeats();
+            var endAfter = endBefore;
+            if (properties && properties.loop) {
+               var loopStart = properties.loop.startBeats !== undefined ? properties.loop.startBeats : launcherClip.getLoopStart().get();
+               var loopLength = properties.loop.lengthBeats !== undefined ? properties.loop.lengthBeats : launcherClip.getLoopLength().get();
+               endAfter = Math.max(endAfter, loopStart + loopLength);
             }
+            var readEnd = Math.min(MAX_CLIP_BEATS, Math.max(endBefore, endAfter));
+            requireGridSpan(readEnd, stepsPerBeat);
+            var sets = parseNoteList(upserts, stepsPerBeat, readEnd, false);
+            var removes = parseNoteList(removals, stepsPerBeat, readEnd, false);
+
+            readClipNotes(stepsPerBeat, readEnd, function(error, before) {
+               try {
+                  if (error) throw error;
+                  var plan = planNoteEdits(before, sets, removes, stepsPerBeat);
+                  if (properties) writeClipProperties(properties);
+                  applyNoteOperations(plan.operations, stepsPerBeat, function(applyError) {
+                     if (applyError) {
+                        failWithClipState(request, applyError, slotIndex, stepsPerBeat, readEnd, plan.expected);
+                        return;
+                     }
+                     verifyClip(request, slot, slotIndex, stepsPerBeat, readEnd, plan.expected, properties, function(actual) {
+                        finish(request, true, {
+                           track: { index: params.trackIndex, name: params.trackName },
+                           clip: clipState(slot, slotIndex),
+                           stepsPerBeat: stepsPerBeat,
+                           notesCreated: plan.created,
+                           notesUpdated: plan.updated,
+                           notesRemoved: plan.removed,
+                           notesVerified: actual.length
+                        });
+                     });
+                  });
+               } catch (planError) {
+                  finish(request, false, { message: String(planError.message || planError) });
+               }
+            });
          });
       });
    });
+}
+
+// Turns requested note edits into grid operations and the full set of notes
+// the clip must hold afterwards. Refuses, before anything changes, to remove
+// a note that is not there or to both set and remove the same note.
+function planNoteEdits(before, sets, removes, stepsPerBeat) {
+   var current = {};
+   var order = [];
+   for (var b = 0; b < before.length; b++) {
+      var held = before[b];
+      var cell = noteCell(held.channel, held.step, held.pitch);
+      current[cell] = {
+         step: held.step, pitch: held.pitch, channel: held.channel,
+         fields: {
+            velocity: held.velocity, duration: held.duration, timbre: held.timbre,
+            pan: held.pan, gain: held.gain, muted: held.muted
+         }
+      };
+      order.push(cell);
+   }
+   var operations = [];
+   var removedCells = {};
+   for (var r = 0; r < removes.length; r++) {
+      var removal = removes[r];
+      var removeCell = noteCell(removal.channel, removal.step, removal.pitch);
+      if (!current[removeCell]) throw new Error("Cannot remove " + noteLabel(removal, stepsPerBeat) + ": the clip has no note there. Nothing was changed.");
+      removedCells[removeCell] = true;
+      operations.push({ kind: "remove", step: removal.step, pitch: removal.pitch, channel: removal.channel });
+   }
+   var created = 0;
+   var updated = 0;
+   for (var s = 0; s < sets.length; s++) {
+      var set = sets[s];
+      var setCell = noteCell(set.channel, set.step, set.pitch);
+      if (removedCells[setCell]) throw new Error(noteLabel(set, stepsPerBeat) + " is both set and removed. Nothing was changed.");
+      var existing = current[setCell];
+      if (existing) {
+         var changes = {};
+         var anyChange = false;
+         for (var field in set.fields) {
+            changes[field] = set.fields[field];
+            existing.fields[field] = set.fields[field];
+            anyChange = true;
+         }
+         if (anyChange) {
+            operations.push({ kind: "update", step: set.step, pitch: set.pitch, channel: set.channel, fields: changes });
+            updated++;
+         }
+      } else {
+         if (set.fields.duration === undefined) throw new Error("New note " + noteLabel(set, stepsPerBeat) + " needs a duration. Nothing was changed.");
+         if (set.fields.velocity === undefined) set.fields.velocity = 100;
+         if (set.fields.muted === undefined) set.fields.muted = false;
+         current[setCell] = set;
+         order.push(setCell);
+         operations.push({ kind: "create", step: set.step, pitch: set.pitch, channel: set.channel, fields: set.fields });
+         created++;
+      }
+   }
+   var expected = [];
+   for (var o = 0; o < order.length; o++) {
+      if (!removedCells[order[o]]) expected.push(current[order[o]]);
+   }
+   return { operations: operations, expected: expected, created: created, updated: updated, removed: removes.length };
 }
 
 function handleRecordLauncherArrangement(request) {
@@ -2480,11 +2959,14 @@ function dispatch(request) {
       case "save_device_preset":
          handleSaveDevicePreset(request);
          return;
-      case "create_note_clip":
-         handleCreateNoteClip(request);
+      case "write_clip":
+         handleWriteClip(request);
          return;
-      case "clip_notes":
-         handleClipNotes(request);
+      case "read_clip":
+         handleReadClip(request);
+         return;
+      case "edit_clip":
+         handleEditClip(request);
          return;
       case "arrange_launcher_clips":
          handleRecordLauncherArrangement(request);
@@ -2925,6 +3407,7 @@ function init() {
    interested(launcherClip.getPlayStart());
    interested(launcherClip.getPlayStop());
    interested(launcherClip.isLoopEnabled());
+   interested(launcherClip.color());
 
    interested(transport.isPlaying());
    interested(transport.isArrangerRecordEnabled());

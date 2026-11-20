@@ -4,7 +4,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `bitwig_read_clip`, `bitwig_write_clip` and `bitwig_edit_clip` replace `bitwig_clip_notes` and `bitwig_create_note_clip`. They read and write clip name, color and loop, notes with velocity, duration, channel, mute and the per-note expressions timbre, pan and gain, and work on any grid from 1 to 960 steps per beat, so off-grid timing is kept. `bitwig_edit_clip` adds, changes or deletes single notes and checks that every other note stays as it was. Tool inputs are strict: unknown fields are rejected.
+
 ### Removed
+
+- `bitwig_clip_notes` and `bitwig_create_note_clip` (see Added). Per-note pressure is not offered because Bitwig does not keep a pressure written through the Controller API.
 
 - The Next.js dashboard (`dashboard/`), its local status service (`src/dashboard-server.mjs`, `src/local-http.mjs`), the macOS WebKit wrapper (`macos/`), the CoreMIDI auto-detect helper (`native/`), the double-click installer, `PORTING.md`, and the launchd agents that started them. No MCP tool used any of them.
 - The controller script no longer declares MIDI ports or a discovery pair, so Bitwig no longer auto-adds it; add it once in Settings → Controllers.

@@ -93,23 +93,23 @@ test("a scene window that will not scroll fails the request", () => {
   assert.match(responses[0].payload.message, /did not scroll its scene window to slot 12/);
 });
 
-test("clip_notes selects the clip in the requested scene", () => {
+test("read_clip selects the clip in the requested scene", () => {
   const { context, responses, advance, state } = setup({ sceneCount: 20, clips: { 10: "Riff" } });
   context.launcherClip = { exists: () => value(() => false) };
-  context.enqueue(5000, "1", "clip_notes", { ...TRACK, slotIndex: 10 }, 60000);
+  context.enqueue(5000, "1", "read_clip", { ...TRACK, slotIndex: 10 }, 60000);
   advance(2000);
   assert.deepEqual(state.selected, [10]);
   assert.match(responses[0].payload.message, /launcher clip in slot 10/);
 });
 
-test("create_note_clip writes into a slot past the first eight", () => {
+test("write_clip writes into a slot past the first eight", () => {
   const { context, responses, advance, state, clips } = setup({ sceneCount: 20 });
   let filled;
-  context.fillNewClip = (request, params, slot, slotIndex) => {
+  context.focusClip = (request, slot, slotIndex) => {
     filled = { absolute: slot.absolute, slotIndex };
     context.finish(request, true, {});
   };
-  context.enqueue(5000, "1", "create_note_clip", { ...TRACK, slotIndex: 14, clipName: "Riff", lengthBeats: 4, notes: [] }, 60000);
+  context.enqueue(5000, "1", "write_clip", { ...TRACK, slotIndex: 14, name: "Riff", lengthBeats: 4, notes: [] }, 60000);
   advance(2000);
   assert.equal(responses[0].ok, true, JSON.stringify(responses[0].payload));
   assert.deepEqual(filled, { absolute: 14, slotIndex: 14 });
@@ -117,23 +117,23 @@ test("create_note_clip writes into a slot past the first eight", () => {
   assert.deepEqual(state.created, []);
 });
 
-test("create_note_clip one past the last scene asks Bitwig for a new scene", () => {
+test("write_clip one past the last scene asks Bitwig for a new scene", () => {
   const { context, responses, advance, state } = setup({ sceneCount: 8 });
   let filled;
-  context.fillNewClip = (request, params, slot, slotIndex) => {
+  context.focusClip = (request, slot, slotIndex) => {
     filled = { absolute: slot.absolute, slotIndex };
     context.finish(request, true, {});
   };
-  context.enqueue(5000, "1", "create_note_clip", { ...TRACK, slotIndex: 8, clipName: "Riff", lengthBeats: 16, notes: [] }, 60000);
+  context.enqueue(5000, "1", "write_clip", { ...TRACK, slotIndex: 8, name: "Riff", lengthBeats: 16, notes: [] }, 60000);
   advance(2000);
   assert.equal(responses[0].ok, true, JSON.stringify(responses[0].payload));
   assert.deepEqual(state.created, [{ slotIndex: 8, lengthBeats: 16 }]);
   assert.deepEqual(filled, { absolute: 8, slotIndex: 8 });
 });
 
-test("create_note_clip refuses a slot more than one past the last scene", () => {
+test("write_clip refuses a slot more than one past the last scene", () => {
   const { context, responses, advance, state } = setup({ sceneCount: 8 });
-  context.enqueue(5000, "1", "create_note_clip", { ...TRACK, slotIndex: 9, clipName: "Riff", lengthBeats: 4, notes: [] }, 60000);
+  context.enqueue(5000, "1", "write_clip", { ...TRACK, slotIndex: 9, name: "Riff", lengthBeats: 4, notes: [] }, 60000);
   advance(1000);
   assert.equal(responses[0].ok, false);
   assert.match(responses[0].payload.message, /a new clip can go in slot 8 at most/);
@@ -164,7 +164,7 @@ test("the scene window reset keeps a cleanup the request already had", () => {
     request.cleanup = () => order.push("selection");
     callback(context.requireTrack());
   };
-  context.enqueue(5000, "1", "clip_notes", { ...TRACK, slotIndex: 12 }, 5000);
+  context.enqueue(5000, "1", "read_clip", { ...TRACK, slotIndex: 12 }, 5000);
   advance(2000);
   assert.ok(responses.length === 1);
   assert.deepEqual(order, ["selection"]);

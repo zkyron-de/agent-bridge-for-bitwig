@@ -21,6 +21,31 @@ const deviceSelector = {
   deviceName: z.string().min(1).describe("Exact device name returned by bitwig_devices; used as a safety check")
 };
 
+// Clip and note schemas shared by the clip tools. Limits mirror the controller
+// (MAX_STEPS_PER_BEAT, MAX_CLIP_BEATS, NOTE_EXPRESSIONS, MAX_NOTES_PER_REPLY).
+const slotIndex = z.number().int().min(0).max(1023).default(0).describe("Launcher slot (scene) index, 0-based");
+const stepsPerBeat = z.number().int().min(1).max(960).default(4)
+  .describe("Grid resolution for note starts in steps per beat (4 = 1/16 at 4/4, 96 for fine timing). Every note start must lie on this grid. Clip span × stepsPerBeat may not exceed 16384");
+const clipColor = z.string().regex(/^#[0-9a-fA-F]{6}$/).describe("Clip color as #RRGGBB");
+const clipLoop = z.strictObject({
+  enabled: z.boolean().optional(),
+  startBeats: z.number().min(0).max(512).optional(),
+  lengthBeats: z.number().positive().max(512).optional()
+}).describe("Clip loop. Values not given are left as they are");
+const noteFields = {
+  beat: z.number().min(0).describe("Start in beats from the clip start; must lie on the stepsPerBeat grid"),
+  pitch: z.number().int().min(0).max(127),
+  channel: z.number().int().min(0).max(15).default(0),
+  velocity: z.number().int().min(1).max(127).optional().describe("1-127; new notes default to 100"),
+  timbre: z.number().min(-1).max(1).optional().describe("Per-note timbre expression, -1 to 1"),
+  pan: z.number().min(-1).max(1).optional().describe("Per-note pan expression, -1 (left) to 1 (right)"),
+  gain: z.number().min(0).max(1).optional().describe("Per-note gain expression, 0 to 1 (Bitwig's NoteStep scale)"),
+  muted: z.boolean().optional()
+};
+const newNote = z.strictObject({ ...noteFields, duration: z.number().positive().describe("Length in beats") });
+const noteChange = z.strictObject({ ...noteFields, duration: z.number().positive().optional().describe("Length in beats; required for a new note") });
+const noteRef = z.strictObject({ beat: noteFields.beat, pitch: noteFields.pitch, channel: noteFields.channel });
+
 function output(data) {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], structuredContent: data };
 }
@@ -199,24 +224,45 @@ server.registerTool("bitwig_save_device_preset", {
   }
 }, async args => call("save_device_preset", args, 15000));
 
-server.registerTool("bitwig_create_note_clip", {
-  description: "Create or replace a launcher MIDI clip on one exact instrument track, write its complete note content, and read every note back; any missing, changed, or extra note fails the call.",
-  inputSchema: {
+server.registerTool("bitwig_write_clip", {
+  description: "Create a launcher MIDI clip (or replace one with replace=true) on one exact track, set its name, length (as its loop) and color, write all its notes, and read the whole clip back. Any missing, changed or extra note or clip property fails the call with the exact differences. Slot = one past the last scene adds a new scene.",
+  inputSchema: z.strictObject({
     ...trackSelector,
-    slotIndex: z.number().int().min(0).max(1023).default(0).describe("Launcher slot (scene) index; one past the last scene adds a new scene"),
-    clipName: z.string().min(1).max(120),
-    lengthBeats: z.number().int().min(1).max(512),
-    stepSize: z.number().min(0.03125).max(4).default(0.25),
-    replace: z.boolean().default(false),
-    notes: z.array(z.object({
-      beat: z.number().nonnegative(),
-      pitch: z.number().int().min(0).max(127),
-      velocity: z.number().int().min(1).max(127).default(100),
-      duration: z.number().positive(),
-      channel: z.number().int().min(0).max(15).default(0)
-    })).max(750).describe("Up to 750 notes per clip; one request to Bitwig must fit in a single 60 KB message")
-  }
-}, async args => call("create_note_clip", args, 120000));
+    slotIndex,
+    name: z.string().min(1).max(120),
+    lengthBeats: z.number().positive().max(512).describe("Clip length in beats. The clip loops from 0 to lengthBeats unless loop says otherwise"),
+    loop: clipLoop.optional().describe("Defaults to an enabled loop from 0 to lengthBeats"),
+    color: clipColor.optional(),
+    stepsPerBeat,
+    replace: z.boolean().default(false).describe("Replace a clip already in the slot"),
+    notes: z.array(newNote).max(750).describe("Complete note content; up to 750 notes (one request must fit in a 60 KB message)")
+  })
+}, async args => call("write_clip", args, 120000));
+
+server.registerTool("bitwig_read_clip", {
+  description: "Read one launcher clip on one exact track: name, color, loop, play state, and its notes with velocity, duration, channel, timbre, pan, gain and mute. Note starts are read on the stepsPerBeat grid; a note between two steps reads back at the step it starts in, so use a finer grid to keep off-grid timing.",
+  inputSchema: z.strictObject({
+    ...trackSelector,
+    slotIndex,
+    stepsPerBeat,
+    offset: z.number().int().nonnegative().default(0).describe("First note to return, for clips with more notes than limit"),
+    limit: z.number().int().min(1).max(300).default(300)
+  })
+}, async args => call("read_clip", args, 120000));
+
+server.registerTool("bitwig_edit_clip", {
+  description: "Change an existing launcher clip on one exact track without rewriting it: set name, loop (start, length, on/off) or color; add or change single notes (setNotes, matched by beat, pitch and channel; only given fields change); delete single notes (removeNotes). The whole clip is read before and after; every untouched note must come back unchanged, or the call fails with the exact differences.",
+  inputSchema: z.strictObject({
+    ...trackSelector,
+    slotIndex,
+    stepsPerBeat,
+    name: z.string().min(1).max(120).optional(),
+    loop: clipLoop.optional().describe("Loop region and on/off; this is how a launcher clip's length is changed"),
+    color: clipColor.optional(),
+    setNotes: z.array(noteChange).max(750).default([]).describe("Notes to add, or to change where a note already starts on that cell"),
+    removeNotes: z.array(noteRef).max(750).default([]).describe("Notes to delete; each must exist")
+  })
+}, async args => call("edit_clip", args, 120000));
 
 server.registerTool("bitwig_arrange_launcher_clips", {
   description: "Record existing launcher clips into Bitwig's Arranger across exact requested beat regions, merging contiguous regions. Recording starts at the earliest region and covers at most 1024 beats. Armed tracks are disarmed and overdub is off while it records; tempo, loop, overdub, arms and playhead are restored afterward, also on failure.",
@@ -236,15 +282,6 @@ server.registerTool("bitwig_clips", {
   description: "List populated launcher clips in every scene for one exact track.",
   inputSchema: trackSelector
 }, async args => call("list_clips", args, 60000));
-
-server.registerTool("bitwig_clip_notes", {
-  description: "Read every note in one launcher clip on one exact track, read from Bitwig's step grid. Notes that start between steps come back at the step they start in (quantized: true).",
-  inputSchema: {
-    ...trackSelector,
-    slotIndex: z.number().int().min(0).max(1023).default(0),
-    stepSize: z.number().min(0.03125).max(4).default(0.25).describe("Grid resolution in beats used to read note starts")
-  }
-}, async args => call("clip_notes", args, 120000));
 
 server.registerTool("bitwig_launch_scene", {
   description: "Launch one scene immediately and from the start across all tracks.",
