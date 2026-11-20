@@ -1,0 +1,73 @@
+name: Bug report
+description: A tool fails, times out, or Bitwig does something other than what the reply says.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Bitwig Agent Bridge is a hobby project, maintained on a best-effort basis.
+        Please check the [Limitations](https://github.com/zkyron-de/bitwig-agent-bridge/blob/main/README.md#limitations) and [Troubleshooting](https://github.com/zkyron-de/bitwig-agent-bridge/blob/main/HELP.md#troubleshooting) first: much of Bitwig's behavior there is known and measured.
+        Do not paste your `data/bridge-token` or other secrets.
+  - type: input
+    id: bitwig
+    attributes:
+      label: Bitwig Studio version
+      placeholder: "6.1.7"
+    validations:
+      required: true
+  - type: input
+    id: language
+    attributes:
+      label: Bitwig display language
+      description: Device types, browser entries and action names follow it.
+      placeholder: "English"
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: macOS and Node.js versions
+      placeholder: "macOS 15.4, Node.js 22.11"
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent
+      placeholder: "Claude Code 2.x"
+  - type: input
+    id: tool
+    attributes:
+      label: Tool
+      description: The bitwig_ tool that failed.
+      placeholder: "bitwig_insert_device"
+    validations:
+      required: true
+  - type: textarea
+    id: request
+    attributes:
+      label: Tool input
+      description: The arguments the agent sent. The entry in logs/bitwig-agent-bridge.jsonl has them.
+      render: json
+  - type: textarea
+    id: reply
+    attributes:
+      label: Reply or error
+      description: What the tool answered.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what Bitwig shows
+      description: A screenshot of Bitwig helps. Check it for personal data first.
+    validations:
+      required: true
+  - type: textarea
+    id: console
+    attributes:
+      label: Controller Script Console
+      description: Optional. Lines from the console (the > icon on the controller in Settings → Controllers).
+      render: text
