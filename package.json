@@ -1,19 +1,24 @@
 {
   "name": "bitwig-agent-bridge",
-  "version": "1.2.1",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "description": "Bitwig Agent Bridge: an MCP bridge for exact, read-back-verified Bitwig Studio control",
-  "author": "Remy Mazmanian",
+  "author": "_zkyron",
   "contributors": [
-    "_zkyron"
+    "Remy Mazmanian (Bitwig Control Deck, the project this is based on)"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zkyron-de/bitwig-agent-bridge.git"
+  },
   "scripts": {
     "start": "node src/index.mjs",
     "setup": "node scripts/setup.mjs",
     "check:api": "node scripts/check-api.mjs",
-    "check": "node --check src/index.mjs && node --check src/tools.mjs && node --check src/bitwig-client.mjs && node --check scripts/setup.mjs && node --check scripts/check-api.mjs && node --check controller/BitwigAgentBridge.control.js",
+    "docs": "node scripts/tool-docs.mjs",
+    "check": "node --check src/index.mjs && node --check src/tools.mjs && node --check src/bitwig-client.mjs && node --check scripts/setup.mjs && node --check scripts/check-api.mjs && node --check scripts/tool-docs.mjs && node --check controller/BitwigAgentBridge.control.js",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {

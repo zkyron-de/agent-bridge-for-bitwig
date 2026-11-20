@@ -26,11 +26,21 @@ agent ──stdio──▶ MCP server (src/index.mjs, src/tools.mjs)
 npm run check          # syntax-check all sources
 npm test               # unit tests, no Bitwig needed; includes the tool registry check
 npm run check:api      # check every API method the controller calls against Bitwig's bundled reference
+npm run docs           # regenerate the Inputs tables in docs/tools.md after changing a schema
 ```
 
-The registry test fails when there are more than 25 tools, a schema accepts unknown fields, a tool and the controller disagree about a method, or [tools.md](tools.md) and the README's tool overview disagree with the registered tools.
+The registry test fails when there are more than 25 tools, a schema accepts unknown fields, a tool and the controller disagree about a method, [tools.md](tools.md) or the README's tool overview disagree with the registered tools, or the Inputs tables are out of date.
 
 Controller API calls are checked against the reference bundled with Bitwig Studio (`/Applications/Bitwig Studio.app/Contents/Resources/Documentation/control-surface/api`); set `BITWIG_API_DOCS` if yours is elsewhere.
+
+## Environment variables
+
+| Variable | Used by | Effect |
+|---|---|---|
+| `BITWIG_AGENT_BRIDGE_TOKEN` | MCP server | Use this secret instead of `data/bridge-token`. It must match the one stamped into the controller. |
+| `BITWIG_AGENT_BRIDGE_HOST`, `BITWIG_AGENT_BRIDGE_PORT` | MCP server | Where the server sends requests (default `127.0.0.1`, `50701`). The controller always listens on `127.0.0.1:50701`, so these are only useful for tests. |
+| `BITWIG_API_DOCS` | `npm run check:api` | Location of Bitwig's Controller API reference |
+| `BITWIG_CONTROLLER` | `npm run check:api` | Check another controller file |
 
 ## Project layout
 
@@ -42,5 +52,6 @@ Controller API calls are checked against the reference bundled with Bitwig Studi
 | `src/bitwig-client.mjs` | UDP client that talks to the controller |
 | `scripts/setup.mjs` | Install: dependencies, secret, controller script |
 | `scripts/check-api.mjs` | API name check against Bitwig's reference |
+| `scripts/tool-docs.mjs` | Generates the Inputs tables in `docs/tools.md` from the schemas |
 | `test/` | Unit tests with fake Bitwig objects, and the registry test |
 | `docs/` | Setup, tool reference, limitations, troubleshooting, this page |

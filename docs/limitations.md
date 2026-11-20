@@ -2,6 +2,26 @@
 
 What the Controller API cannot do, and Bitwig behavior the bridge works with. Everything here was measured in Bitwig Studio 6.1.7.
 
+## Reach and sizes
+
+The bridge works with fixed windows onto your project, as the Controller API requires.
+
+| What | Limit |
+|---|---|
+| Main tracks / effect tracks | first 64 / first 16 |
+| Sends per track | 8 |
+| Devices per track | 32 top-level devices |
+| Launcher scenes and slots | 1024 |
+| Cue markers | 256 |
+| Notes per clip | 4096; read in pages of up to 300 |
+| Notes per write or edit request | 750 |
+| Clip length and loop | 512 beats; one request covers at most 16384 grid steps |
+| Parameters per reply / per change | 200 / 32 |
+| Browser results per reply | 200 |
+| Scenes per launcher reply | 128 |
+| Actions per reply | 200 |
+| One reply from Bitwig | 60,000 bytes |
+
 ## Not offered
 
 - Arranger clips cannot be edited directly. Launcher clips can be printed into the Arranger with `bitwig_arrange_launcher_clips` (first eight scenes, at most 1024 beats per print).

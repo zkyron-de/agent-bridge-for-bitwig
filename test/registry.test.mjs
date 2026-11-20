@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { registerTools } from "../src/tools.mjs";
+import { registeredTools, render } from "../scripts/tool-docs.mjs";
 
 // The tool registry as the MCP server sees it: name, config and the
 // controller method each handler calls.
@@ -62,4 +63,8 @@ test("the README tool overview lists exactly the registered tools and counts the
   assert.deepEqual([...listed].sort(), tools.map(t => t.name).sort());
   assert.match(readme, new RegExp(`All ${tools.length} tools`));
   assert.match(readme, new RegExp(`^${tools.length} tools, each`, "m"));
+});
+
+test("the Inputs tables in docs/tools.md match the schemas (run npm run docs)", () => {
+  assert.equal(render(reference, registeredTools()), reference);
 });
