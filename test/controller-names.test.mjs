@@ -17,12 +17,14 @@ function setup(names) {
     })
   };
   context.trackSnapshot = (track, index) => ({ index, name: track.name().get() });
+  context.effectTrackBank = { itemCount: () => value(() => 0), getItemAt: () => ({ exists: () => value(() => false) }) };
+  context.masterTrack = { name: () => value(() => "Master") };
   return { ...loaded, items };
 }
 
 test("tools refuse a track whose name another track shares", () => {
   const { context, responses, advance } = setup(["Drums", "Audio", "Bass", "Audio"]);
-  context.enqueue(5000, "1", "set_track_mix", { trackIndex: 3, trackName: "Audio", mute: true }, 5000);
+  context.enqueue(5000, "1", "set_track", { trackIndex: 3, trackName: "Audio", mute: true }, 5000);
   advance(1000);
   assert.equal(responses[0].ok, false);
   assert.match(responses[0].payload.message, /Tracks 1, 3 are all named ‘Audio’/);
@@ -33,26 +35,26 @@ test("a track with a unique name passes the check", () => {
   assert.equal(context.requireTrack({ trackIndex: 2, trackName: "Bass" }).name().get(), "Bass");
 });
 
-test("rename_track still works on a duplicate so the clash can be fixed", () => {
+test("set_track can still rename a duplicate so the clash can be fixed", () => {
   const { context, responses, advance, items } = setup(["Audio", "Audio"]);
-  context.enqueue(5000, "1", "rename_track", { trackIndex: 1, trackName: "Audio", newName: "Vox" }, 5000);
+  context.enqueue(5000, "1", "set_track", { trackIndex: 1, trackName: "Audio", name: "Vox" }, 5000);
   advance(1000);
   assert.equal(responses[0].ok, true, JSON.stringify(responses[0].payload));
   assert.deepEqual(items.map(i => i.name), ["Audio", "Vox"]);
 });
 
-test("rename_track refuses a name another track already has", () => {
+test("set_track refuses a name another track already has", () => {
   const { context, responses, advance, items } = setup(["Drums", "Bass"]);
-  context.enqueue(5000, "1", "rename_track", { trackIndex: 1, trackName: "Bass", newName: "Drums" }, 5000);
+  context.enqueue(5000, "1", "set_track", { trackIndex: 1, trackName: "Bass", name: "Drums" }, 5000);
   advance(1000);
   assert.equal(responses[0].ok, false);
   assert.match(responses[0].payload.message, /Track 0 is already named ‘Drums’/);
   assert.deepEqual(items.map(i => i.name), ["Drums", "Bass"]);
 });
 
-test("rename_track to its own current name is allowed", () => {
+test("set_track to its own current name is allowed", () => {
   const { context, responses, advance } = setup(["Drums", "Bass"]);
-  context.enqueue(5000, "1", "rename_track", { trackIndex: 1, trackName: "Bass", newName: "Bass" }, 5000);
+  context.enqueue(5000, "1", "set_track", { trackIndex: 1, trackName: "Bass", name: "Bass" }, 5000);
   advance(1000);
   assert.equal(responses[0].ok, true);
 });
@@ -62,5 +64,5 @@ test("bitwig_tracks lists names that need fixing", () => {
   context.trackSnapshot = (track, index) => ({ index, name: track.name().get() });
   const result = context.listTracks();
   assert.deepEqual(JSON.parse(JSON.stringify(result.duplicateNames)), ["Audio"]);
-  assert.match(result.note, /bitwig_rename_track/);
+  assert.match(result.note, /bitwig_set_track/);
 });

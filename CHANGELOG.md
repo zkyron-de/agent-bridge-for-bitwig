@@ -8,8 +8,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - `bitwig_read_clip`, `bitwig_write_clip` and `bitwig_edit_clip` replace `bitwig_clip_notes` and `bitwig_create_note_clip`. They read and write clip name, color and loop, notes with velocity, duration, channel, mute and the per-note expressions timbre, pan and gain (in dB, as Bitwig's Inspector shows it), and work on any grid from 1 to 960 steps per beat, so off-grid timing is kept. `bitwig_edit_clip` adds, changes or deletes single notes and checks that every other note stays as it was. Tool inputs are strict: unknown fields are rejected.
 
+- `bitwig_set_track` replaces `bitwig_set_track_mix` and `bitwig_rename_track`. It sets name, color, volume and pan, mute, solo and arm, and send level, on/off and pre/post mode, on main tracks, effect tracks and the master track, and reads every value back. Volume and send levels are in dB and pan runs from −1 to 1, as Bitwig's mixer shows them.
+- `bitwig_tracks` also lists effect tracks and the master track, and gives each track its color, volume in dB, pan and sends.
+
 ### Removed
 
+- `bitwig_set_track_mix` and `bitwig_rename_track` (see `bitwig_set_track`). The track list no longer carries `reference`, `volumeNormalized` or `panNormalized`.
 - `bitwig_clip_notes` and `bitwig_create_note_clip` (see Added). Per-note pressure is not offered because Bitwig does not keep a pressure written through the Controller API.
 
 - The Next.js dashboard (`dashboard/`), its local status service (`src/dashboard-server.mjs`, `src/local-http.mjs`), the macOS WebKit wrapper (`macos/`), the CoreMIDI auto-detect helper (`native/`), the double-click installer, `PORTING.md`, and the launchd agents that started them. No MCP tool used any of them.
@@ -17,6 +21,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- The bridge reaches the first 64 main tracks and 16 effect tracks (was 128 and 32), with 8 sends per track.
 - Renamed the project to **Bitwig Agent Bridge**: package and MCP server name `bitwig-agent-bridge`, controller script `controller/BitwigAgentBridge.control.js` (vendor and name "Bitwig Agent Bridge", new extension UUID), install folder `Controller Scripts/Bitwig Agent Bridge/`, wire protocol `bitwig-agent-bridge/1`, environment variables `BITWIG_AGENT_BRIDGE_HOST`, `_PORT` and `_TOKEN`, and request log `logs/bitwig-agent-bridge.jsonl`. The UDP port stays 50701. An installed Control Deck script does not talk to the renamed server; remove it from Bitwig and add Bitwig Agent Bridge instead.
 - The controller uses the non-deprecated five-argument `defineController` with an author.
 - The controller now targets Controller API 25 (Bitwig Studio 6, tested with 6.1.7) instead of 18. `bitwig_status` reports the requested and the host API version. The deprecated `Device.isParameterPageSectionVisible` is no longer used, so the remote-controls replies drop `parameterListVisible`, and cue markers are positioned with `SettableBeatTimeValue.set`.

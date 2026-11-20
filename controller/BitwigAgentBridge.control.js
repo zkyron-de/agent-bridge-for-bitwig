@@ -12,7 +12,10 @@ var BRIDGE_PORT = 50701;
 // Stamped with a per-install secret by `npm run setup`. The bridge refuses to
 // start while the placeholder is still in place.
 var BRIDGE_TOKEN = "__BRIDGE_TOKEN__";
-var MAX_TRACKS = 128;
+// Bank sizes, fixed at init as the Controller API requires.
+var MAX_TRACKS = 64;
+// Sends per track; send i goes to effect track i.
+var MAX_SENDS = 8;
 var MAX_DEVICES = 64;
 var MAX_SCENES = 8;
 // Highest launcher slot or scene the tools accept. Bitwig shows MAX_SCENES of
@@ -24,7 +27,17 @@ var MAX_CUE_MARKERS = 256;
 var MAX_PRINT_SPAN_BEATS = 1024;
 var BROWSER_PAGE = 128;
 var MAX_BROWSER_RESULTS = 16384;
-var MAX_EFFECT_TRACKS = 32;
+var MAX_EFFECT_TRACKS = 16;
+// Track volume and send levels. Measured in Bitwig 6.1.7 against the mixer
+// display: Parameter.getRaw() is an amplitude root with dB = 60 * log10(raw)
+// (0 is -inf). Track volume tops out at +6.02 dB (raw 2^(1/3)), sends at 0 dB
+// (raw 1). Track pan's raw value runs from -1 (100 % left) to 1 (100 % right).
+var MIN_LEVEL_DB = -120;
+var MAX_TRACK_VOLUME_DB = 6;
+var MAX_SEND_DB = 0;
+var LEVEL_TOLERANCE_DB = 0.05;
+var PAN_TOLERANCE = 0.002;
+var SEND_MODES = ["AUTO", "PRE", "POST"];
 // Note grid of the launcher cursor clip: steps per window and keys (all 128
 // MIDI pitches). Reads and writes scroll this window across the clip.
 var CLIP_GRID_WIDTH = 256;
@@ -77,6 +90,7 @@ var project;
 var transport;
 var trackBank;
 var effectTrackBank;
+var masterTrack;
 var cursorTrack;
 var trackIsCursor = [];
 var deviceBank;
@@ -275,21 +289,50 @@ function cueMarkerFingerprintCounts() {
    return counts;
 }
 
-function trackSnapshot(track, index) {
+function levelDb(raw) {
+   return raw > 0 ? roundTo(60 * Math.log(raw) / Math.LN10, 2) : null;
+}
+
+function levelRaw(db) {
+   return Math.pow(10, db / 60);
+}
+
+function sendSnapshot(send, index) {
    return {
       index: index,
-      reference: "track:" + track.position().get() + ":" + track.name().get(),
+      name: send.name().get(),
+      levelDb: levelDb(send.getRaw()),
+      enabled: send.isEnabled().get(),
+      mode: String(send.sendMode().get())
+   };
+}
+
+// One track's state. kind is "main", "effect" or "master"; only main tracks
+// have arm and sends here (the effect and master banks are created without).
+function trackSnapshot(track, index, kind) {
+   kind = kind || "main";
+   var state = {
+      index: index,
       name: track.name().get(),
       type: track.trackType().get(),
-      position: track.position().get(),
+      color: colorHex(track.color()),
       mute: track.mute().get(),
       solo: track.solo().get(),
-      arm: track.arm().get(),
-      volumeNormalized: track.volume().get(),
+      volumeDb: levelDb(track.volume().getRaw()),
       volumeDisplay: track.volume().displayedValue().get(),
-      panNormalized: track.pan().get(),
-      panDisplay: track.pan().displayedValue().get()
+      pan: roundTo(track.pan().getRaw(), 4)
    };
+   if (kind === "main") {
+      state.position = track.position().get();
+      state.arm = track.arm().get();
+      var sends = [];
+      for (var s = 0; s < MAX_SENDS; s++) {
+         var send = track.sendBank().getItemAt(s);
+         if (send.exists().get()) sends.push(sendSnapshot(send, s));
+      }
+      state.sends = sends;
+   }
+   return state;
 }
 
 function listTracks() {
@@ -298,13 +341,23 @@ function listTracks() {
    var tracks = [];
    for (var i = 0; i < count; i++) {
       var track = trackBank.getItemAt(i);
-      if (track.exists().get()) tracks.push(trackSnapshot(track, i));
+      if (track.exists().get()) tracks.push(trackSnapshot(track, i, "main"));
    }
-   var result = { total: total, returned: tracks.length, truncated: total > MAX_TRACKS, tracks: tracks };
-   var duplicates = duplicateTrackNames(tracks);
+   var effectTotal = effectTrackBank.itemCount().get();
+   var effectTracks = [];
+   for (var e = 0; e < Math.min(effectTotal, MAX_EFFECT_TRACKS); e++) {
+      var effectTrack = effectTrackBank.getItemAt(e);
+      if (effectTrack.exists().get()) effectTracks.push(trackSnapshot(effectTrack, e, "effect"));
+   }
+   var result = {
+      total: total, returned: tracks.length, truncated: total > MAX_TRACKS, tracks: tracks,
+      effectTracks: effectTracks, effectTracksTruncated: effectTotal > MAX_EFFECT_TRACKS,
+      master: trackSnapshot(masterTrack, 0, "master")
+   };
+   var duplicates = duplicateTrackNames(tracks).concat(duplicateTrackNames(effectTracks));
    if (duplicates.length) {
       result.duplicateNames = duplicates;
-      result.note = "Tools refuse tracks that share a name. Rename them with bitwig_rename_track first.";
+      result.note = "Tools refuse tracks that share a name. Rename them with bitwig_set_track first.";
    }
    return result;
 }
@@ -320,12 +373,13 @@ function duplicateTrackNames(tracks) {
    return duplicates;
 }
 
-// Indices of the reachable tracks with exactly this name.
-function trackIndicesNamed(name) {
-   var count = Math.min(trackBank.itemCount().get(), MAX_TRACKS);
+// Indices of the reachable tracks in a bank with exactly this name.
+function trackIndicesNamed(name, bank, limit) {
+   bank = bank || trackBank;
+   var count = Math.min(bank.itemCount().get(), limit || MAX_TRACKS);
    var indices = [];
    for (var i = 0; i < count; i++) {
-      var track = trackBank.getItemAt(i);
+      var track = bank.getItemAt(i);
       if (track.exists().get() && track.name().get() === name) indices.push(i);
    }
    return indices;
@@ -350,29 +404,46 @@ function readTrackMeters(resetAfterRead) {
    return { range: 128, meters: meters };
 }
 
-// API 18 has no stable track IDs (Channel.channelId arrives in API 20), so a track is
-// identified by index plus name. When two tracks share the name, a shifted
-// index could land on the wrong one and still pass, so such tracks are refused
-// unless the caller is renaming one of them.
+// A track is identified by index plus name. When two tracks share the name, a
+// shifted index could land on the wrong one and still pass, so such tracks are
+// refused unless the caller is renaming one of them.
 function requireTrack(params, allowDuplicateName) {
+   return requireChannel(params, allowDuplicateName).track;
+}
+
+// Like requireTrack, for params.trackKind "main" (default), "effect" or
+// "master". Returns { track, kind, bank, limit, index }.
+function requireChannel(params, allowDuplicateName) {
+   var kind = params.trackKind === undefined ? "main" : String(params.trackKind);
    var index = Number(params.trackIndex);
-   if (index < 0 || index >= MAX_TRACKS || index >= trackBank.itemCount().get()) {
-      throw new Error("Track index " + index + " is not available. Refresh with bitwig_tracks.");
+   if (kind === "master") {
+      if (index !== 0) throw new Error("The master track has index 0.");
+      if (masterTrack.name().get() !== String(params.trackName)) {
+         throw new Error("Safety check failed: the master track is named ‘" + masterTrack.name().get() + "’, not ‘" + params.trackName + "’. Refresh first.");
+      }
+      return { track: masterTrack, kind: kind, bank: null, limit: 1, index: 0 };
    }
-   var track = trackBank.getItemAt(index);
-   if (!track.exists().get()) throw new Error("Track " + index + " no longer exists.");
+   if (kind !== "main" && kind !== "effect") throw new Error("trackKind must be main, effect or master.");
+   var bank = kind === "effect" ? effectTrackBank : trackBank;
+   var limit = kind === "effect" ? MAX_EFFECT_TRACKS : MAX_TRACKS;
+   var label = kind === "effect" ? "Effect track" : "Track";
+   if (!(index >= 0 && index < limit && index < bank.itemCount().get()) || Math.floor(index) !== index) {
+      throw new Error(label + " index " + params.trackIndex + " is not available. Refresh with bitwig_tracks.");
+   }
+   var track = bank.getItemAt(index);
+   if (!track.exists().get()) throw new Error(label + " " + index + " no longer exists.");
    var currentName = track.name().get();
    if (currentName !== String(params.trackName)) {
-      throw new Error("Safety check failed: track " + index + " is now named ‘" + currentName + "’, not ‘" + params.trackName + "’. Refresh first.");
+      throw new Error("Safety check failed: " + label.toLowerCase() + " " + index + " is now named ‘" + currentName + "’, not ‘" + params.trackName + "’. Refresh first.");
    }
    if (!allowDuplicateName) {
-      var sameName = trackIndicesNamed(currentName);
+      var sameName = trackIndicesNamed(currentName, bank, limit);
       if (sameName.length > 1) {
-         throw new Error("Tracks " + sameName.join(", ") + " are all named ‘" + currentName + "’, so Bitwig Agent Bridge cannot be sure which one is meant. " +
-            "Rename them with bitwig_rename_track so each name is unique, then try again.");
+         throw new Error(label + "s " + sameName.join(", ") + " are all named ‘" + currentName + "’, so Bitwig Agent Bridge cannot be sure which one is meant. " +
+            "Rename them with bitwig_set_track so each name is unique, then try again.");
       }
    }
-   return track;
+   return { track: track, kind: kind, bank: bank, limit: limit, index: index };
 }
 
 function selectTrack(request, params, callback) {
@@ -1589,7 +1660,7 @@ function handleCreateTrack(request) {
                }
                throw new Error("Bitwig created the track at index " + index + " but did not apply the name ‘" + params.name + "’.");
             }
-            var created = effect ? { index: index, name: track.name().get() } : trackSnapshot(track, index);
+            var created = trackSnapshot(track, index, effect ? "effect" : "main");
             created.kind = params.kind;
             if (effect) created.effectTrackIndex = index;
             finish(request, true, { created: created, emptyDeviceChain: true, presetLoaded: false });
@@ -1654,72 +1725,151 @@ function clipSnapshot(slot, slotIndex) {
    };
 }
 
-function handleSetTrackMix(request) {
-   var params = request.params;
-   var track = requireTrack(params);
-   if (params.volumeNormalized !== undefined) {
-      var volume = Number(params.volumeNormalized);
-      if (!(volume >= 0 && volume <= 1)) throw new Error("Track volume must be between 0 and 1.");
-      track.volume().setImmediately(volume);
-   }
-   if (params.panNormalized !== undefined) {
-      var pan = Number(params.panNormalized);
-      if (!(pan >= 0 && pan <= 1)) throw new Error("Track pan must be between 0 and 1.");
-      track.pan().setImmediately(pan);
-   }
-   if (params.mute !== undefined) track.mute().set(Boolean(params.mute));
-   if (params.solo !== undefined) track.solo().set(Boolean(params.solo));
-   if (params.arm !== undefined) track.arm().set(Boolean(params.arm));
-   verifyReadback(request, function() {
-      var problems = [];
-      if (params.volumeNormalized !== undefined && differs(track.volume().get(), params.volumeNormalized, 0.002)) {
-         problems.push("volume is " + track.volume().get() + ", requested " + params.volumeNormalized);
-      }
-      if (params.panNormalized !== undefined && differs(track.pan().get(), params.panNormalized, 0.002)) {
-         problems.push("pan is " + track.pan().get() + ", requested " + params.panNormalized);
-      }
-      // Bitwig's script host only supports direct method calls on these values
-      // (track.mute()), not computed ones (track["mute"]()).
-      var switches = [
-         { name: "mute", actual: track.mute().get() },
-         { name: "solo", actual: track.solo().get() },
-         { name: "arm", actual: track.arm().get() }
-      ];
-      for (var i = 0; i < switches.length; i++) {
-         var requested = params[switches[i].name];
-         if (requested !== undefined && switches[i].actual !== Boolean(requested)) {
-            problems.push(switches[i].name + " is " + switches[i].actual + ", requested " + Boolean(requested));
-         }
-      }
-      return problems.join("; ");
-   }, function() {
-      finish(request, true, { track: trackSnapshot(track, Number(params.trackIndex)) });
-   });
+function requireLevel(value, max, label) {
+   var db = Number(value);
+   if (!(db >= MIN_LEVEL_DB && db <= max)) throw new Error(label + " must be from " + MIN_LEVEL_DB + " to " + max + " dB; use mute for silence.");
+   return db;
 }
 
-function handleRenameTrack(request) {
-   var params = request.params;
-   var track = requireTrack(params, true);
-   var oldName = track.name().get();
-   var newName = String(params.newName || "").trim();
-   if (!newName || newName.length > 120) throw new Error("New track name must contain 1 to 120 characters.");
-   var taken = trackIndicesNamed(newName);
-   for (var takenIndex = 0; takenIndex < taken.length; takenIndex++) {
-      if (taken[takenIndex] !== Number(params.trackIndex)) {
-         throw new Error("Track " + taken[takenIndex] + " is already named ‘" + newName + "’. Pick a unique name so tools can tell the tracks apart.");
+// Validates a set_track request completely before anything changes.
+function parseTrackChanges(params, target) {
+   var changes = { sends: [] };
+   var any = false;
+   if (params.name !== undefined) {
+      var name = String(params.name).trim();
+      if (!name || name.length > 120) throw new Error("Track name must contain 1 to 120 characters.");
+      if (target.kind === "master") throw new Error("The master track cannot be renamed.");
+      var taken = trackIndicesNamed(name, target.bank, target.limit);
+      for (var t = 0; t < taken.length; t++) {
+         if (taken[t] !== target.index) {
+            throw new Error((target.kind === "effect" ? "Effect track " : "Track ") + taken[t] + " is already named ‘" + name + "’. Pick a unique name so tools can tell the tracks apart.");
+         }
+      }
+      changes.name = name;
+      any = true;
+   }
+   if (params.color !== undefined) {
+      changes.color = parseHexColor(params.color, "Track color");
+      any = true;
+   }
+   if (params.volumeDb !== undefined) {
+      changes.volumeDb = requireLevel(params.volumeDb, MAX_TRACK_VOLUME_DB, "Track volume");
+      any = true;
+   }
+   if (params.pan !== undefined) {
+      var pan = Number(params.pan);
+      if (!(pan >= -1 && pan <= 1)) throw new Error("Track pan must be from -1 (left) to 1 (right).");
+      changes.pan = pan;
+      any = true;
+   }
+   var switches = ["mute", "solo", "arm"];
+   for (var w = 0; w < switches.length; w++) {
+      if (params[switches[w]] === undefined) continue;
+      if (switches[w] === "arm" && target.kind !== "main") throw new Error("Only main tracks can be armed.");
+      changes[switches[w]] = Boolean(params[switches[w]]);
+      any = true;
+   }
+   var sends = params.sends || [];
+   if (!Array.isArray(sends)) throw new Error("sends must be an array.");
+   if (sends.length && target.kind !== "main") throw new Error("Sends can only be set on main tracks.");
+   var seen = {};
+   for (var i = 0; i < sends.length; i++) {
+      var request = sends[i] || {};
+      var sendIndex = Number(request.sendIndex);
+      if (!(sendIndex >= 0 && sendIndex < MAX_SENDS) || Math.floor(sendIndex) !== sendIndex) {
+         throw new Error("Send index must be a whole number from 0 to " + (MAX_SENDS - 1) + ".");
+      }
+      if (seen[sendIndex]) throw new Error("Send " + sendIndex + " is listed twice.");
+      seen[sendIndex] = true;
+      var send = target.track.sendBank().getItemAt(sendIndex);
+      if (!send.exists().get()) throw new Error("Track ‘" + target.track.name().get() + "’ has no send " + sendIndex + ". Refresh with bitwig_tracks.");
+      if (send.name().get() !== String(request.sendName)) {
+         throw new Error("Safety check failed: send " + sendIndex + " goes to ‘" + send.name().get() + "’, not ‘" + request.sendName + "’. Refresh first.");
+      }
+      var change = { index: sendIndex, send: send };
+      if (request.levelDb !== undefined) change.levelDb = requireLevel(request.levelDb, MAX_SEND_DB, "Send level");
+      if (request.enabled !== undefined) change.enabled = Boolean(request.enabled);
+      if (request.mode !== undefined) {
+         change.mode = String(request.mode);
+         if (SEND_MODES.indexOf(change.mode) === -1) throw new Error("Send mode must be AUTO, PRE or POST.");
+      }
+      if (change.levelDb === undefined && change.enabled === undefined && change.mode === undefined) {
+         throw new Error("Send " + sendIndex + " has nothing to change: pass levelDb, enabled or mode.");
+      }
+      changes.sends.push(change);
+      any = true;
+   }
+   if (!any) throw new Error("Nothing to change: pass name, color, volumeDb, pan, mute, solo, arm or sends.");
+   return changes;
+}
+
+function trackChangeProblems(track, changes) {
+   var problems = [];
+   if (changes.name !== undefined && track.name().get() !== changes.name) {
+      problems.push("name is ‘" + track.name().get() + "’, requested ‘" + changes.name + "’");
+   }
+   if (changes.color && !sameColor(track.color(), changes.color)) {
+      problems.push("color is " + colorHex(track.color()) + ", requested " + changes.color.hex);
+   }
+   if (changes.volumeDb !== undefined) {
+      var volume = levelDb(track.volume().getRaw());
+      if (volume === null || differs(volume, changes.volumeDb, LEVEL_TOLERANCE_DB)) {
+         problems.push("volume is " + track.volume().displayedValue().get() + ", requested " + changes.volumeDb + " dB");
       }
    }
-   track.setName(newName);
-   later(120, function() {
-      try {
-         if (track.name().get() !== newName) throw new Error("Bitwig did not confirm the new track name.");
-         finish(request, true, {
-            renamed: { oldName: oldName, newName: newName },
-            track: trackSnapshot(track, Number(params.trackIndex))
-         });
-      } catch (error) {
-         finish(request, false, { message: String(error.message || error) });
+   if (changes.pan !== undefined && differs(track.pan().getRaw(), changes.pan, PAN_TOLERANCE)) {
+      problems.push("pan is " + roundTo(track.pan().getRaw(), 4) + ", requested " + changes.pan);
+   }
+   // Bitwig's script host only supports direct method calls on these values.
+   if (changes.mute !== undefined && track.mute().get() !== changes.mute) problems.push("mute is " + track.mute().get() + ", requested " + changes.mute);
+   if (changes.solo !== undefined && track.solo().get() !== changes.solo) problems.push("solo is " + track.solo().get() + ", requested " + changes.solo);
+   if (changes.arm !== undefined && track.arm().get() !== changes.arm) problems.push("arm is " + track.arm().get() + ", requested " + changes.arm);
+   for (var i = 0; i < changes.sends.length; i++) {
+      var change = changes.sends[i];
+      var send = change.send;
+      var label = "send " + change.index + " (" + send.name().get() + ")";
+      if (change.levelDb !== undefined) {
+         var level = levelDb(send.getRaw());
+         if (level === null || differs(level, change.levelDb, LEVEL_TOLERANCE_DB)) {
+            problems.push(label + " level is " + send.displayedValue().get() + ", requested " + change.levelDb + " dB");
+         }
       }
+      if (change.enabled !== undefined && send.isEnabled().get() !== change.enabled) {
+         problems.push(label + " is " + (send.isEnabled().get() ? "enabled" : "disabled") + ", requested " + (change.enabled ? "enabled" : "disabled"));
+      }
+      if (change.mode !== undefined && String(send.sendMode().get()) !== change.mode) {
+         problems.push(label + " mode is " + send.sendMode().get() + ", requested " + change.mode);
+      }
+   }
+   return problems.join("; ");
+}
+
+// Sets name, color, volume, pan, mute, solo, arm and sends on one track,
+// then reads every requested value back.
+function handleSetTrack(request) {
+   var params = request.params;
+   var target = requireChannel(params, params.name !== undefined);
+   var changes = parseTrackChanges(params, target);
+   var track = target.track;
+   if (changes.name !== undefined) track.setName(changes.name);
+   if (changes.color) track.color().set(changes.color.red, changes.color.green, changes.color.blue);
+   if (changes.volumeDb !== undefined) track.volume().setRaw(levelRaw(changes.volumeDb));
+   if (changes.pan !== undefined) track.pan().setRaw(changes.pan);
+   if (changes.mute !== undefined) track.mute().set(changes.mute);
+   if (changes.solo !== undefined) track.solo().set(changes.solo);
+   if (changes.arm !== undefined) track.arm().set(changes.arm);
+   for (var i = 0; i < changes.sends.length; i++) {
+      var change = changes.sends[i];
+      // Setting a level switches a disabled send on (measured in Bitwig
+      // 6.1.7), so the requested on/off state is applied after the level.
+      if (change.levelDb !== undefined) change.send.setRaw(levelRaw(change.levelDb));
+      if (change.enabled !== undefined) change.send.isEnabled().set(change.enabled);
+      if (change.mode !== undefined) change.send.sendMode().set(change.mode);
+   }
+   verifyReadback(request, function() {
+      return trackChangeProblems(track, changes);
+   }, function() {
+      finish(request, true, { trackKind: target.kind, track: trackSnapshot(track, target.index, target.kind) });
    });
 }
 
@@ -2959,11 +3109,8 @@ function dispatch(request) {
       case "create_track":
          handleCreateTrack(request);
          return;
-      case "set_track_mix":
-         handleSetTrackMix(request);
-         return;
-      case "rename_track":
-         handleRenameTrack(request);
+      case "set_track":
+         handleSetTrack(request);
          return;
       case "delete_track":
          var track = requireTrack(params);
@@ -3306,14 +3453,28 @@ function markTrack(track) {
    interested(track.exists());
    interested(track.name());
    interested(track.trackType());
-   interested(track.position());
    interested(track.mute());
    interested(track.solo());
-   interested(track.arm());
    interested(track.volume());
    interested(track.volume().displayedValue());
    interested(track.pan());
    interested(track.pan().displayedValue());
+   interested(track.color());
+}
+
+function markMainTrack(track) {
+   markTrack(track);
+   interested(track.position());
+   interested(track.arm());
+   for (var s = 0; s < MAX_SENDS; s++) {
+      var send = track.sendBank().getItemAt(s);
+      interested(send.exists());
+      interested(send.name());
+      interested(send);
+      interested(send.displayedValue());
+      interested(send.isEnabled());
+      interested(send.sendMode());
+   }
 }
 
 function observeTrackMeter(track, index) {
@@ -3370,7 +3531,9 @@ function init() {
    cueMarkerBank = arranger.createCueMarkerBank(MAX_CUE_MARKERS);
    project = host.getProject();
    transport = host.createTransport();
-   trackBank = host.createMainTrackBank(MAX_TRACKS, 0, MAX_SCENES);
+   trackBank = host.createMainTrackBank(MAX_TRACKS, MAX_SENDS, MAX_SCENES);
+   masterTrack = host.createMasterTrack(0);
+   markTrack(masterTrack);
    sceneBank = trackBank.sceneBank();
    interested(sceneBank.itemCount());
    interested(sceneBank.scrollPosition());
@@ -3444,7 +3607,7 @@ function init() {
 
    for (var i = 0; i < MAX_TRACKS; i++) {
       var markedTrack = trackBank.getItemAt(i);
-      markTrack(markedTrack);
+      markMainTrack(markedTrack);
       trackIsCursor[i] = markedTrack.createEqualsValue(cursorTrack);
       interested(trackIsCursor[i]);
       observeTrackMeter(markedTrack, i);
@@ -3457,9 +3620,7 @@ function init() {
    }
    interested(effectTrackBank.itemCount());
    for (var effectIndex = 0; effectIndex < MAX_EFFECT_TRACKS; effectIndex++) {
-      var effectTrack = effectTrackBank.getItemAt(effectIndex);
-      interested(effectTrack.exists());
-      interested(effectTrack.name());
+      markTrack(effectTrackBank.getItemAt(effectIndex));
    }
 
    cursorDevice.addDirectParameterIdObserver(function(ids) {

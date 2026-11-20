@@ -30,7 +30,7 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 - List, create, position, and rename Arranger cue markers with readback verification
 - Read, write and edit launcher clips: name, color, loop, and notes with velocity, duration, timbre, pan and gain on a grid of up to 960 steps per beat
 - Build Arranger MIDI clips from existing launcher patterns at exact beat positions
-- List, create, and safely delete tracks
+- List, create, and safely delete tracks; set name, color, volume (dB), pan, mute, solo, arm and sends on main, effect and master tracks
 - List and safely delete devices
 - Search the Devices browser and insert one exact device
 - Read the full direct parameter list for native and third-party devices

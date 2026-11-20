@@ -117,16 +117,16 @@ server.registerTool("bitwig_cue_markers", {
 }, async args => call("cue_markers", args, 30000));
 
 server.registerTool("bitwig_tracks", {
-  description: "List Bitwig tracks with exact names, positions, safety references, types, and states.",
-  inputSchema: {}
+  description: "List the project's main tracks (up to 64), effect tracks (up to 16) and the master track with index, exact name, type, color, mute, solo, volumeDb (null = -inf), pan (-1 left to 1 right) and, for main tracks, arm and sends (index, target effect track name, levelDb, enabled, mode). Use the index and name with the other track tools.",
+  inputSchema: z.strictObject({})
 }, async () => call("list_tracks"));
 
 server.registerTool("bitwig_track_meters", {
   description: "Read peak signal activity captured for every Bitwig track, or reset the captured maxima before a playback test.",
-  inputSchema: {
+  inputSchema: z.strictObject({
     action: z.enum(["read", "reset"]).default("read"),
     resetAfterRead: z.boolean().default(false)
-  }
+  })
 }, async args => call("track_meters", args));
 
 server.registerTool("bitwig_plugins", {
@@ -167,31 +167,33 @@ server.registerTool("bitwig_refresh_plugin_index", {
 
 server.registerTool("bitwig_create_track", {
   description: "Create an empty Bitwig track without opening the Browser or loading any preset. Effect tracks live in a separate list and are returned with effectTrackIndex.",
-  inputSchema: {
+  inputSchema: z.strictObject({
     kind: z.enum(["instrument", "audio", "effect"]),
-    name: z.string().min(1).max(120)
-  }
+    name: z.string().min(1).max(120).describe("Unique track name")
+  })
 }, async args => call("create_track", args));
 
-server.registerTool("bitwig_set_track_mix", {
-  description: "Set exact mixer values on one verified track and read the resulting state back from Bitwig.",
-  inputSchema: {
+server.registerTool("bitwig_set_track", {
+  description: "Change one exact track: name, color, volume, pan, mute, solo, arm and send levels. Works on main tracks, effect tracks (trackKind 'effect') and the master track (trackKind 'master', index 0). Only the given fields change; every one is read back from Bitwig, and the call fails with the exact differences if Bitwig holds something else. Renaming works on a track whose name another track shares, so clashes can be fixed.",
+  inputSchema: z.strictObject({
+    trackKind: z.enum(["main", "effect", "master"]).default("main").describe("Which list trackIndex refers to, as returned by bitwig_tracks"),
     ...trackSelector,
-    volumeNormalized: z.number().min(0).max(1).optional(),
-    panNormalized: z.number().min(0).max(1).optional().describe("0 is left, 0.5 is center, and 1 is right"),
+    name: z.string().min(1).max(120).optional().describe("New unique name"),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().describe("Track color as #RRGGBB"),
+    volumeDb: z.number().min(-120).max(6).optional().describe("Fader level in dB, -120 to +6; use mute for silence"),
+    pan: z.number().min(-1).max(1).optional().describe("-1 is 100 % left, 0 center, 1 is 100 % right"),
     mute: z.boolean().optional(),
     solo: z.boolean().optional(),
-    arm: z.boolean().optional()
-  }
-}, async args => call("set_track_mix", args));
-
-server.registerTool("bitwig_rename_track", {
-  description: "Rename one verified Bitwig track without changing its audio or MIDI routing.",
-  inputSchema: {
-    ...trackSelector,
-    newName: z.string().min(1).max(120)
-  }
-}, async args => call("rename_track", args));
+    arm: z.boolean().optional().describe("Record arm; main tracks only"),
+    sends: z.array(z.strictObject({
+      sendIndex: z.number().int().min(0).max(7),
+      sendName: z.string().min(1).describe("Exact name of the effect track this send goes to, as bitwig_tracks lists it; a safety check"),
+      levelDb: z.number().min(-120).max(0).optional().describe("Send level in dB, -120 to 0"),
+      enabled: z.boolean().optional().describe("Send on or off. Setting a level alone switches a send on"),
+      mode: z.enum(["AUTO", "PRE", "POST"]).optional().describe("Pre- or post-fader; AUTO follows the effect track's setting")
+    })).max(8).optional().describe("Main tracks only")
+  })
+}, async args => call("set_track", args));
 
 server.registerTool("bitwig_delete_track", {
   description: "Delete one exact track. The supplied name must still match, preventing index drift mistakes.",

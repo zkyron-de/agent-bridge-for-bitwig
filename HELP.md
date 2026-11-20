@@ -127,7 +127,7 @@ Merge it into the file each one reads, then restart it or refresh its MCP list:
 
 ## MCP tool reference
 
-All 36 tools follow the same contract: **exact targets** (mutations require both index and current name; stale names are refused), **no preset loading** (only Bitwig's Devices browser is used), and **readback verification** (writes report the value Bitwig actually shows afterward).
+All 35 tools follow the same contract: **exact targets** (mutations require both index and current name; stale names are refused), **no preset loading** (only Bitwig's Devices browser is used), and **readback verification** (writes report the value Bitwig actually shows afterward).
 
 ### Status & session
 
@@ -139,10 +139,9 @@ All 36 tools follow the same contract: **exact targets** (mutations require both
 
 ### Tracks
 
-- **bitwig_tracks** — List tracks with exact names, positions, safety references, types, and states.
-- **bitwig_create_track** — Create an empty track without opening the Browser or loading any preset. The bridge finds the track Bitwig added by comparing the track list before and after, then names it and checks the name. Effect tracks are reported with their `effectTrackIndex` in the effect track list. With 128 main tracks (or 32 effect tracks) it refuses before creating anything.
-- **bitwig_set_track_mix** — Set exact mixer values on one verified track and read the resulting state back.
-- **bitwig_rename_track** — Rename one verified track without changing its routing.
+- **bitwig_tracks** — List the main tracks (up to 64), effect tracks (up to 16) and the master track: index, exact name, type, color, mute, solo, `volumeDb` (`null` is −∞), `pan`, and for main tracks `position`, `arm` and `sends` (index, target effect track, `levelDb`, `enabled`, `mode`).
+- **bitwig_create_track** — Create an empty track without opening the Browser or loading any preset. The bridge finds the track Bitwig added by comparing the track list before and after, then names it and checks the name. Effect tracks are reported with their `effectTrackIndex` in the effect track list. With 64 main tracks (or 16 effect tracks) it refuses before creating anything, because the bridge could not reach the new track.
+- **bitwig_set_track** — Change one exact track: `name`, `color` (`#RRGGBB`), `volumeDb` (−120 to +6 dB), `pan` (−1 = 100 % left, 1 = 100 % right), `mute`, `solo`, `arm`, and `sends` (`levelDb` −120 to 0 dB, `enabled`, `mode` AUTO/PRE/POST; each send names its target effect track as a safety check). `trackKind` picks the list: `main` (default), `effect`, or `master` (index 0); arm and sends are for main tracks only. Only the given fields change, every one is read back, and a value Bitwig did not take fails the call with what it holds. Setting a send level switches the send on in Bitwig, so `enabled: false` is applied after the level. Renaming works on a track whose name another track shares, so clashes can be fixed; a name another track already has is refused.
 - **bitwig_delete_track** — Delete one exact track; the supplied name must still match, preventing index-drift mistakes. It succeeds only after Bitwig's track list shows the track gone and every other track in its place. Deleting a group also removes its tracks, and the reply's `removedCount` says how many went.
 
 ### Clips & arrangement
@@ -207,7 +206,7 @@ Port (loopback-only): `50701/udp` bridge.
 
 **The controller refuses to start and mentions a missing token.** The repo copy of the controller was installed by hand instead of through setup, so the secret placeholder was never stamped. Run setup; never copy `controller/BitwigAgentBridge.control.js` into Bitwig manually.
 
-**A tool says several tracks "are all named" the same.** The bridge does not use track IDs yet, so Bitwig Agent Bridge finds a track by its position and checks its name. When two tracks share a name, that check can't catch a track that moved, so tools refuse them. `bitwig_tracks` lists the clashing names under `duplicateNames`. Give each track a unique name, in Bitwig or with `bitwig_rename_track`, which still works on duplicates and refuses a name another track already has.
+**A tool says several tracks "are all named" the same.** The bridge does not use track IDs yet, so Bitwig Agent Bridge finds a track by its position and checks its name. When two tracks share a name, that check can't catch a track that moved, so tools refuse them. `bitwig_tracks` lists the clashing names under `duplicateNames`. Give each track a unique name, in Bitwig or with `bitwig_set_track` and `name`, which still works on duplicates and refuses a name another track already has.
 
 **Save to Library opened, but nothing was saved.** Bitwig's API can open the dialog but can't type into it, so `bitwig_save_device_preset` leaves the dialog open for you to name and save. With `confirm: true` it presses Enter to accept the prefilled name, and only when the same device is still selected. Compare `presetNameBefore` and `presetNameAfter` in the reply, then check the Library.
 
