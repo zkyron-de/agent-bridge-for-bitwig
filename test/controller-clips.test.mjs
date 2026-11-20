@@ -150,10 +150,10 @@ test("read_clip reads notes with expressions across pages and channels", () => {
   assert.equal(response.payload.noteCount, 4);
   assert.deepEqual(plain(response.payload.clip.loop), { enabled: true, startBeats: 0, lengthBeats: 128 });
   assert.deepEqual(plain(response.payload.notes), [
-    { beat: 0, pitch: 60, channel: 0, velocity: 100, duration: 0.5, timbre: -0.5, pan: 0.25, gain: 0.4, muted: false },
-    { beat: 0, pitch: 64, channel: 3, velocity: 90, duration: 0.25, timbre: 0, pan: 0, gain: 0, muted: false },
-    { beat: 70.5, pitch: 67, channel: 0, velocity: 1, duration: 1, timbre: 0, pan: 0, gain: 0, muted: true },
-    { beat: 127.75, pitch: 127, channel: 0, velocity: 127, duration: 0.25, timbre: 0, pan: 0, gain: 0, muted: false }
+    { beat: 0, pitch: 60, channel: 0, velocity: 100, duration: 0.5, timbre: -0.5, pan: 0.25, gainDb: -5.81, muted: false },
+    { beat: 0, pitch: 64, channel: 3, velocity: 90, duration: 0.25, timbre: 0, pan: 0, gainDb: null, muted: false },
+    { beat: 70.5, pitch: 67, channel: 0, velocity: 1, duration: 1, timbre: 0, pan: 0, gainDb: null, muted: true },
+    { beat: 127.75, pitch: 127, channel: 0, velocity: 127, duration: 0.25, timbre: 0, pan: 0, gainDb: null, muted: false }
   ]);
 });
 
@@ -214,7 +214,7 @@ test("read_clip refuses stepsPerBeat outside 1-960", () => {
 const WRITE = {
   name: "Riff", lengthBeats: 128, color: "#3366CC",
   notes: [
-    { beat: 0, pitch: 60, velocity: 100, duration: 0.5, timbre: 0.5, gain: 0.25 },
+    { beat: 0, pitch: 60, velocity: 100, duration: 0.5, timbre: 0.5, gainDb: -18 },
     { beat: 0.5, pitch: 64, velocity: 90, duration: 0.25, channel: 2, pan: -1 },
     { beat: 96, pitch: 67, velocity: 110, duration: 1, muted: true }
   ]
@@ -235,7 +235,10 @@ test("write_clip succeeds only after every note and property reads back", () => 
   assert.deepEqual(plain(response.payload.clip.loop), { enabled: true, startBeats: 0, lengthBeats: 128 });
   const stored = run.clip.state.notes.find(n => n.pitch === 60);
   assert.equal(stored.timbre, 0.5);
-  assert.equal(stored.gain, 0.25, "gain is written on the setter's scale");
+  // Bitwig 6.1.7 shows dB = 60 * log10(2 * setGain value).
+  assert.ok(Math.abs(stored.gain - Math.pow(10, -18 / 60) / 2) < 1e-9, "gainDb is converted to the setter's scale");
+  assert.equal(run.clip.state.notes.find(n => n.pitch === 64).gain, 0.5, "a new note without gainDb gets 0 dB written");
+  assert.equal(response.payload.notes, undefined);
 });
 
 test("write_clip writes fine-grid notes at their exact position", () => {
@@ -263,7 +266,7 @@ const mismatches = [
   ["a wrong channel", { onCreate: note => ({ ...note, channel: note.pitch === 64 ? 0 : note.channel }) }, /pitch 64 at beat 0.5 \(channel 2\) is missing.*unexpected pitch 64 at beat 0.5 \(channel 0\)/],
   ["an unmuted note", { onSet: (note, field, value) => (field === "muted" ? false : value) }, /pitch 67 at beat 96 \(channel 0\): note is not muted/],
   ["a lost timbre", { onSet: (note, field, value) => (field === "timbre" ? 0 : value) }, /pitch 60 at beat 0 \(channel 0\): timbre is 0, requested 0.5/],
-  ["a wrong gain", { onSet: (note, field, value) => (field === "gain" ? 0.3 : value) }, /pitch 60 at beat 0 \(channel 0\): gain is 0.3, requested 0.25/]
+  ["a wrong gain", { onSet: (note, field, value) => (field === "gain" ? 0.3 : value) }, /pitch 60 at beat 0 \(channel 0\): gainDb is -13.31, requested -18/]
 ];
 
 for (const [name, hooks, message] of mismatches) {
@@ -300,7 +303,8 @@ test("write_clip accepts a color one 8-bit step off, as Bitwig stores it", () =>
 test("write_clip lists at most five differences and counts the rest", () => {
   const notes = Array.from({ length: 8 }, (_, i) => ({ beat: i, pitch: 60 + i, duration: 0.25 }));
   const response = write(WRITE, { hooks: { onCreate: () => null } }).run("write_clip", { ...WRITE, notes });
-  assert.match(response.payload.message, /does not hold the 8 expected notes/);
+  // All eight notes are gone; the setter pass stops and reports the diff.
+  assert.match(response.payload.message, /now differs from the request: pitch 60 at beat 0 \(channel 0\) is missing/);
   assert.match(response.payload.message, /; and 3 more\.$/);
 });
 
@@ -309,7 +313,7 @@ const refusals = [
   ["a start past the clip end", { beat: 4, pitch: 60, duration: 0.25 }, /must start between beat 0 and the clip end at beat 4/],
   ["a note running past the clip end", { beat: 3.5, pitch: 60, duration: 1 }, /ends by the clip end at beat 4/],
   ["a timbre above 1", { beat: 0, pitch: 60, duration: 1, timbre: 1.5 }, /timbre 1.5; it must be from -1 to 1/],
-  ["a negative gain", { beat: 0, pitch: 60, duration: 1, gain: -0.5 }, /gain -0.5; it must be from 0 to 1/],
+  ["a gain above +18 dB", { beat: 0, pitch: 60, duration: 1, gainDb: 24 }, /gainDb 24; it must be from -100 to 18 dB/],
   ["a missing duration", { beat: 0, pitch: 60 }, /needs a duration/]
 ];
 
@@ -350,7 +354,7 @@ test("write_clip reports the clip state when Bitwig stops part-way", () => {
   const response = write(WRITE, { hooks }).run("write_clip", WRITE);
   assert.equal(response.ok, false);
   assert.match(response.payload.message, /^Bitwig stopped the change part-way: Parameter gain/);
-  assert.match(response.payload.message, /now differs from the request: pitch 60 at beat 0 \(channel 0\): gain is 0, requested 0.25/);
+  assert.match(response.payload.message, /now differs from the request: pitch 60 at beat 0 \(channel 0\): gainDb is 0 or unset \(Bitwig reads 0\), requested -18/);
 });
 
 // ------------------------------------------------------------------ edit_clip

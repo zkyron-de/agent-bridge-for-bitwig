@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- `bitwig_read_clip`, `bitwig_write_clip` and `bitwig_edit_clip` replace `bitwig_clip_notes` and `bitwig_create_note_clip`. They read and write clip name, color and loop, notes with velocity, duration, channel, mute and the per-note expressions timbre, pan and gain, and work on any grid from 1 to 960 steps per beat, so off-grid timing is kept. `bitwig_edit_clip` adds, changes or deletes single notes and checks that every other note stays as it was. Tool inputs are strict: unknown fields are rejected.
+- `bitwig_read_clip`, `bitwig_write_clip` and `bitwig_edit_clip` replace `bitwig_clip_notes` and `bitwig_create_note_clip`. They read and write clip name, color and loop, notes with velocity, duration, channel, mute and the per-note expressions timbre, pan and gain (in dB, as Bitwig's Inspector shows it), and work on any grid from 1 to 960 steps per beat, so off-grid timing is kept. `bitwig_edit_clip` adds, changes or deletes single notes and checks that every other note stays as it was. Tool inputs are strict: unknown fields are rejected.
 
 ### Removed
 

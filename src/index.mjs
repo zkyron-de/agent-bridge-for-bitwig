@@ -39,7 +39,7 @@ const noteFields = {
   velocity: z.number().int().min(1).max(127).optional().describe("1-127; new notes default to 100"),
   timbre: z.number().min(-1).max(1).optional().describe("Per-note timbre expression, -1 to 1"),
   pan: z.number().min(-1).max(1).optional().describe("Per-note pan expression, -1 (left) to 1 (right)"),
-  gain: z.number().min(0).max(1).optional().describe("Per-note gain expression, 0 to 1 (Bitwig's NoteStep scale)"),
+  gainDb: z.number().min(-100).max(18).optional().describe("Per-note gain in dB, -100 to +18 (Bitwig's Inspector 'Lautstärke'/'Gain'). New notes default to 0 dB. Use muted for silence"),
   muted: z.boolean().optional()
 };
 const newNote = z.strictObject({ ...noteFields, duration: z.number().positive().describe("Length in beats") });
@@ -240,7 +240,7 @@ server.registerTool("bitwig_write_clip", {
 }, async args => call("write_clip", args, 120000));
 
 server.registerTool("bitwig_read_clip", {
-  description: "Read one launcher clip on one exact track: name, color, loop, play state, and its notes with velocity, duration, channel, timbre, pan, gain and mute. Note starts are read on the stepsPerBeat grid; a note between two steps reads back at the step it starts in, so use a finer grid to keep off-grid timing.",
+  description: "Read one launcher clip on one exact track: name, color, loop, play state, and its notes with velocity, duration, channel, timbre, pan, gainDb and mute. gainDb is null when Bitwig reads 0: the note's gain was never set (it plays at 0 dB) or it is -inf; the API cannot tell these apart. Note starts are read on the stepsPerBeat grid; a note between two steps reads back at the step it starts in, so use a finer grid to keep off-grid timing.",
   inputSchema: z.strictObject({
     ...trackSelector,
     slotIndex,

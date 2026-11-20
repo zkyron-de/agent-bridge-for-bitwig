@@ -49,11 +49,17 @@ var MAX_NOTES_PER_REPLY = 300;
 // API reference does not state them). Pressure is left out on purpose: a value
 // written with NoteStep.setPressure does not persist (it is reset when notes
 // are added, when timbre, pan or gain change, and on later reads).
-var NOTE_EXPRESSIONS = { timbre: [-1, 1], pan: [-1, 1], gain: [0, 1] };
+var NOTE_EXPRESSIONS = { timbre: [-1, 1], pan: [-1, 1] };
 var NOTE_EXPRESSION_TOLERANCE = 0.001;
-// NoteStep.gain() reports twice the value NoteStep.setGain() takes (measured
-// in Bitwig 6.1.7). Tools use the setter's 0..1 scale both ways.
+// Per-note gain. Tools speak dB (gainDb); Bitwig's NoteStep.setGain takes
+// 0..1 and NoteStep.gain() reads twice that. Measured in Bitwig 6.1.7 against
+// the Inspector: dB = 60 * log10(2 * setGain value), so 0.5 is 0 dB, 1 is
+// +18.1 dB and 0 is -inf. A note whose gain was never set plays at 0 dB but
+// reads 0, the same as -inf, so new notes get 0 dB written explicitly and a
+// read of 0 is reported as gainDb null.
 var NOTE_GAIN_READ_SCALE = 2;
+var NOTE_GAIN_DB_RANGE = [-100, 18];
+var NOTE_DEFAULT_GAIN = 0.5;
 // NoteStep setters, in the order they are called.
 var NOTE_SETTER_FIELDS = ["velocity", "duration", "muted", "timbre", "pan", "gain"];
 // Waits that let Bitwig's grid observers catch up after a scroll or a write.
@@ -1885,8 +1891,23 @@ function parseNote(note, index, stepsPerBeat, endBeats, requireAll) {
       if (!(amount >= range[0] && amount <= range[1])) throw new Error(where + " has " + name + " " + note[name] + "; it must be from " + range[0] + " to " + range[1] + ".");
       parsed.fields[name] = amount;
    }
+   if (note.gainDb !== undefined) {
+      var db = Number(note.gainDb);
+      if (!(db >= NOTE_GAIN_DB_RANGE[0] && db <= NOTE_GAIN_DB_RANGE[1])) {
+         throw new Error(where + " has gainDb " + note.gainDb + "; it must be from " + NOTE_GAIN_DB_RANGE[0] + " to " + NOTE_GAIN_DB_RANGE[1] + " dB. Use muted for silence.");
+      }
+      parsed.fields.gain = gainFromDb(db);
+   }
    if (note.muted !== undefined) parsed.fields.muted = Boolean(note.muted);
    return parsed;
+}
+
+function gainFromDb(db) {
+   return Math.pow(10, db / 60) / 2;
+}
+
+function dbFromGain(gain) {
+   return gain > 0 ? roundTo(60 * Math.log(2 * gain) / Math.LN10, 2) : null;
 }
 
 function parseNoteList(notes, stepsPerBeat, endBeats, requireAll) {
@@ -1954,7 +1975,7 @@ function noteFromStep(step, absoluteStep, stepsPerBeat) {
       duration: roundTo(step.duration(), 6),
       timbre: roundTo(step.timbre(), 4),
       pan: roundTo(step.pan(), 4),
-      gain: roundTo(step.gain() / NOTE_GAIN_READ_SCALE, 4),
+      gain: roundTo(step.gain() / NOTE_GAIN_READ_SCALE, 6),
       muted: step.isMuted()
    };
 }
@@ -1966,7 +1987,7 @@ function publicNotes(notes) {
       var note = notes[i];
       result.push({
          beat: note.beat, pitch: note.pitch, channel: note.channel, velocity: note.velocity, duration: note.duration,
-         timbre: note.timbre, pan: note.pan, gain: note.gain, muted: note.muted
+         timbre: note.timbre, pan: note.pan, gainDb: dbFromGain(note.gain), muted: note.muted
       });
    }
    return result;
@@ -1993,12 +2014,12 @@ function compareNotes(expected, actual, stepsPerBeat) {
       for (var field in want.fields) {
          var requested = want.fields[field];
          var held = got[field];
-         var tolerance = field === "duration" ? 0.0001 : NOTE_EXPRESSIONS[field] ? NOTE_EXPRESSION_TOLERANCE : 0;
+         var tolerance = field === "duration" ? 0.0001 : NOTE_EXPRESSIONS[field] || field === "gain" ? NOTE_EXPRESSION_TOLERANCE : 0;
          var same = typeof requested === "boolean" ? held === requested : Math.abs(Number(held) - requested) <= tolerance;
          if (!same) {
-            diffs.push(field === "muted"
-               ? (requested ? "note is not muted" : "note is muted")
-               : field + " is " + held + ", requested " + requested);
+            if (field === "muted") diffs.push(requested ? "note is not muted" : "note is muted");
+            else if (field === "gain") diffs.push("gainDb is " + (held > 0 ? dbFromGain(held) : "0 or unset (Bitwig reads 0)") + ", requested " + dbFromGain(requested));
+            else diffs.push(field + " is " + held + ", requested " + requested);
          }
       }
       if (diffs.length) problems.push(noteLabel(want, stepsPerBeat) + ": " + diffs.join(", "));
@@ -2341,6 +2362,7 @@ function handleWriteClip(request) {
       var note = notes[i];
       if (note.fields.velocity === undefined) note.fields.velocity = 100;
       if (note.fields.muted === undefined) note.fields.muted = false;
+      if (note.fields.gain === undefined) note.fields.gain = NOTE_DEFAULT_GAIN;
       operations.push({ kind: "create", step: note.step, pitch: note.pitch, channel: note.channel, fields: note.fields });
    }
 
@@ -2529,6 +2551,7 @@ function planNoteEdits(before, sets, removes, stepsPerBeat) {
          if (set.fields.duration === undefined) throw new Error("New note " + noteLabel(set, stepsPerBeat) + " needs a duration. Nothing was changed.");
          if (set.fields.velocity === undefined) set.fields.velocity = 100;
          if (set.fields.muted === undefined) set.fields.muted = false;
+         if (set.fields.gain === undefined) set.fields.gain = NOTE_DEFAULT_GAIN;
          current[setCell] = set;
          order.push(setCell);
          operations.push({ kind: "create", step: set.step, pitch: set.pitch, channel: set.channel, fields: set.fields });
