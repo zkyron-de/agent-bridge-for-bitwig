@@ -18,9 +18,9 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 
 ## Design rules
 
-- Device loading uses Bitwig's **Devices** browsing session only. It never searches or loads presets.
+- Devices, Bitwig presets and plug-ins are inserted by their exact browser name; samples by file path.
 - Track and device mutations require both the index and the exact current name.
-- Device insertion is refused when an exact name has multiple matches, unless a Bitwig device-type filter disambiguates it.
+- Device insertion is refused when an exact name has multiple matches, unless a browser location, device-type or category filter disambiguates it.
 - Third-party parameters use Bitwig's stable direct parameter IDs and are paged to keep messages small.
 - Parameter writes report Bitwig's observed value after the change.
 
@@ -31,11 +31,10 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 - Read, write and edit launcher clips: name, color, loop, and notes with velocity, duration, timbre, pan and gain on a grid of up to 960 steps per beat
 - Build Arranger MIDI clips from existing launcher patterns at exact beat positions
 - List, create, and safely delete tracks; set name, color, volume (dB), pan, mute, solo, arm and sends on main, effect and master tracks
-- List and safely delete devices
-- Search the Devices browser and insert one exact device
-- Read the full direct parameter list for native and third-party devices
-- Set a parameter by stable ID with readback
-- Open a plug-in/device window
+- List and safely delete devices; turn them on or off, open plug-in windows, show remote-controls pages
+- Search Bitwig's browser and insert one exact device, preset or plug-in at the end of a chain or before a device; load a sample file into a Sampler
+- Read remote-controls pages and the full direct parameter list for native and third-party devices
+- Set many parameters at once, by stable ID or remote control, with readback
 
 The complete tool reference, troubleshooting, and uninstall steps live in [HELP.md](HELP.md).
 
@@ -67,7 +66,6 @@ Then, once:
 ```sh
 npm run check          # syntax-check all sources
 npm test               # unit tests (no Bitwig needed)
-npm run index:plugins  # rebuild the local plug-in inventory
 ```
 
 ## Security model

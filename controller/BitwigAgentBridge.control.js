@@ -16,7 +16,7 @@ var BRIDGE_TOKEN = "__BRIDGE_TOKEN__";
 var MAX_TRACKS = 64;
 // Sends per track; send i goes to effect track i.
 var MAX_SENDS = 8;
-var MAX_DEVICES = 64;
+var MAX_DEVICES = 32;
 var MAX_SCENES = 8;
 // Highest launcher slot or scene the tools accept. Bitwig shows MAX_SCENES of
 // them at a time, and withSceneSlot scrolls that window to reach the rest.
@@ -25,8 +25,33 @@ var MAX_CUE_MARKERS = 256;
 // Longest stretch one launcher print records: about 92 seconds at 666 BPM,
 // inside the print's 115-second limit.
 var MAX_PRINT_SPAN_BEATS = 1024;
+// Browser: results per page, entries per filter bank (location, device type,
+// category; longer columns are paged), most entries one search scans, and
+// most results one reply returns.
 var BROWSER_PAGE = 128;
+var BROWSER_FILTER_BANK = 64;
+var MAX_BROWSER_REPLY = 200;
 var MAX_BROWSER_RESULTS = 16384;
+// Waits for Bitwig's browser to open, to apply a filter, to scroll a bank and
+// to settle its result list; then polls for an inserted device.
+var BROWSER_OPEN_MS = 300;
+var BROWSER_FILTER_SETTLE_MS = 180;
+var BROWSER_SCROLL_SETTLE_MS = 100;
+var BROWSER_SELECT_SETTLE_MS = 80;
+var BROWSER_SETTLE_MS = 1000;
+var INSERT_FIRST_CHECK_MS = 300;
+var INSERT_WAIT_ATTEMPTS = 50;
+var SAMPLE_FILE_PATTERN = /\.(wav|aif|aiff|flac)$/i;
+// Device parameters: direct writes use 128 steps (the resolution Bitwig's own
+// generic controller scripts use), reads and writes agree within
+// PARAMETER_TOLERANCE, and replies carry at most MAX_PARAMETERS_PER_REPLY.
+var DIRECT_PARAMETER_RESOLUTION = 128;
+var PARAMETER_TOLERANCE = 0.01;
+var MAX_PARAMETER_CHANGES = 32;
+var MAX_PARAMETERS_PER_REPLY = 200;
+var PARAMETER_SETTLE_MS = 400;
+var REMOTE_PAGE_SETTLE_MS = 250;
+var EDITOR_SELECT_SETTLE_MS = 120;
 var MAX_EFFECT_TRACKS = 16;
 // Track volume and send levels. Measured in Bitwig 6.1.7 against the mixer
 // display: Parameter.getRaw() is an amplitude root with dB = 60 * log10(raw)
@@ -95,25 +120,20 @@ var cursorTrack;
 var trackIsCursor = [];
 var deviceBank;
 var cursorDevice;
-var cursorDeviceSlot;
 var cursorRemoteControlsPage;
-var nestedDeviceBank;
 var launcherClip;
 var sceneBank;
 var popupBrowser;
 var resultColumn;
 var resultBank;
+var locationBank;
 var deviceTypeBank;
 var categoryBank;
-var tagBank;
-var fileTypeBank;
-var creatorBank;
 var directIds = [];
 var directNames = {};
 var directValues = {};
 var directDisplays = {};
 var directDisplayObserver;
-var saveToLibraryAction;
 var jumpToBeginningAction;
 var trackMeterLatest = [];
 var trackMeterMaximum = [];
@@ -523,10 +543,11 @@ function deviceSnapshot(device, index) {
       name: device.name().get(),
       type: device.deviceType().get(),
       position: device.position().get(),
-      nested: device.isNested().get(),
       plugin: device.isPlugin().get(),
       enabled: device.isEnabled().get(),
       windowOpen: device.isWindowOpen().get(),
+      expanded: device.isExpanded().get(),
+      remoteControlsVisible: device.isRemoteControlsSectionVisible().get(),
       presetName: device.presetName().get(),
       sampleName: device.sampleName().get()
    };
@@ -538,17 +559,6 @@ function listDevicesNow() {
    var devices = [];
    for (var i = 0; i < count; i++) {
       var device = deviceBank.getItemAt(i);
-      if (device.exists().get()) devices.push(deviceSnapshot(device, i));
-   }
-   return { total: total, returned: devices.length, truncated: total > MAX_DEVICES, devices: devices };
-}
-
-function listNestedDevicesNow() {
-   var total = nestedDeviceBank.itemCount().get();
-   var count = Math.min(total, MAX_DEVICES);
-   var devices = [];
-   for (var i = 0; i < count; i++) {
-      var device = nestedDeviceBank.getItemAt(i);
       if (device.exists().get()) devices.push(deviceSnapshot(device, i));
    }
    return { total: total, returned: devices.length, truncated: total > MAX_DEVICES, devices: devices };
@@ -608,39 +618,6 @@ function selectDevice(request, params, callback) {
          finish(request, false, { message: String(error.message || error) });
       }
    });
-}
-
-function parameterSnapshot(id) {
-   return {
-      id: id,
-      name: directNames[id] || id,
-      normalizedValue: directValues[id] === undefined ? null : directValues[id],
-      displayValue: directDisplays[id] || ""
-   };
-}
-
-function remoteControlsSnapshot() {
-   var pageNames = arrayCopy(cursorRemoteControlsPage.pageNames().get());
-   var selectedPageIndex = cursorRemoteControlsPage.selectedPageIndex().get();
-   var controls = [];
-   for (var i = 0; i < 8; i++) {
-      var control = cursorRemoteControlsPage.getParameter(i);
-      controls.push({
-         index: i,
-         exists: control.exists().get(),
-         name: control.name().get(),
-         normalizedValue: control.get(),
-         displayValue: control.displayedValue().get()
-      });
-   }
-   return {
-      remoteControlsVisible: cursorDevice.isRemoteControlsSectionVisible().get(),
-      pageCount: cursorRemoteControlsPage.pageCount().get(),
-      pageNames: pageNames,
-      selectedPageIndex: selectedPageIndex,
-      selectedPageName: selectedPageIndex >= 0 && selectedPageIndex < pageNames.length ? pageNames[selectedPageIndex] : "",
-      controls: controls
-   };
 }
 
 var authFailureCount = 0;
@@ -761,6 +738,15 @@ function enqueue(source, id, method, params, timeoutMs) {
    processNextRequest();
 }
 
+// ---------------------------------------------------------------- Browser
+// Bitwig 6.1.7's popup browser ignores selectedContentTypeIndex().set(): it
+// stays on its first, unified view (measured). Tools narrow it with the
+// location column instead ("Devices", "Presets", a device name for that
+// device's presets, or a plug-in folder such as "System VST 3 Plug-ins").
+// Samples have no location there, so they cannot be found through the
+// browser; bitwig_insert_sample takes a file path. Which devices the browser
+// offers also depends on the insertion point, as in Bitwig's own UI.
+
 function readFilterOptions(bank) {
    var options = [];
    var count = Math.min(bank.itemCount().get(), bank.getSizeOfBank());
@@ -780,78 +766,118 @@ function resetBrowserFilters() {
    popupBrowser.tagColumn().getWildcardItem().isSelected().set(true);
    popupBrowser.fileTypeColumn().getWildcardItem().isSelected().set(true);
    popupBrowser.creatorColumn().getWildcardItem().isSelected().set(true);
+   locationBank.scrollPosition().set(0);
    deviceTypeBank.scrollPosition().set(0);
    categoryBank.scrollPosition().set(0);
-   tagBank.scrollPosition().set(0);
-   fileTypeBank.scrollPosition().set(0);
-   creatorBank.scrollPosition().set(0);
    resultBank.scrollPosition().set(0);
 }
 
+// The browser stays open across several scheduled steps. Whatever ends the
+// request (success, error or timeout) closes it.
+function guardBrowser(request) {
+   if (request.browserGuarded) return;
+   request.browserGuarded = true;
+   var previousCleanup = request.cleanup;
+   request.cleanup = function() {
+      if (popupBrowser.exists().get()) popupBrowser.cancel();
+      if (previousCleanup) previousCleanup();
+   };
+}
+
+// Pages through a filter column and selects the entry named `value`.
 function selectFilterValue(request, label, bank, value, callback) {
-   if (!value) {
+   if (value === undefined || value === null || value === "") {
       callback();
       return;
    }
-   bank.scrollPosition().set(0);
-   later(90, function() {
-      try {
-         var wanted = normalizeText(value);
-         var count = Math.min(bank.itemCount().get(), bank.getSizeOfBank());
-         var match = null;
+   var wanted = normalizeText(value);
+   var size = bank.getSizeOfBank();
+   var offset = 0;
+   var seen = [];
+   function scan() {
+      bank.scrollPosition().set(offset);
+      later(BROWSER_SCROLL_SETTLE_MS, function() {
+         try {
+            var total = bank.itemCount().get();
+            var count = Math.min(size, total - offset);
+            for (var i = 0; i < count; i++) {
+               var item = bank.getItemAt(i);
+               if (!item.exists().get()) continue;
+               var name = item.name().get();
+               seen.push(name);
+               if (normalizeText(name) === wanted) {
+                  item.isSelected().set(true);
+                  later(BROWSER_FILTER_SETTLE_MS, callback);
+                  return;
+               }
+            }
+            offset += size;
+            if (offset < total) {
+               scan();
+               return;
+            }
+            throw new Error("The browser has no " + label + " named ‘" + value + "’ here. Available: " + seen.join(", ") + ".");
+         } catch (error) {
+            finish(request, false, { message: String(error.message || error) });
+         }
+      });
+   }
+   scan();
+}
+
+// Reads every entry of a filter column, paging through it.
+function readAllFilterOptions(bank, callback) {
+   var size = bank.getSizeOfBank();
+   var offset = 0;
+   var options = [];
+   function scan() {
+      bank.scrollPosition().set(offset);
+      later(BROWSER_SCROLL_SETTLE_MS, function() {
+         var total = bank.itemCount().get();
+         var count = Math.min(size, total - offset);
          for (var i = 0; i < count; i++) {
             var item = bank.getItemAt(i);
-            if (item.exists().get() && normalizeText(item.name().get()) === wanted) match = item;
+            if (item.exists().get()) options.push(item.name().get());
          }
-         if (!match) {
-            throw new Error("No exact " + label + " filter named ‘" + value + "’. Available: " + readFilterOptions(bank).join(", "));
+         offset += size;
+         if (offset < total) scan();
+         else {
+            bank.scrollPosition().set(0);
+            callback(options);
          }
-         match.isSelected().set(true);
-         later(180, callback);
-      } catch (error) {
-         popupBrowser.cancel();
-         finish(request, false, { message: String(error.message || error) });
-      }
-   });
+      });
+   }
+   scan();
 }
 
-function prepareBrowser(request, params, callback) {
-   cursorTrack.endOfDeviceChainInsertionPoint().browse();
-   later(280, function() {
+// Opens the browser at an insertion point, clears every filter, then applies
+// location, deviceType and category from `filters`.
+function openBrowser(request, insertionPoint, filters, callback) {
+   guardBrowser(request);
+   insertionPoint.browse();
+   later(BROWSER_OPEN_MS, function() {
       try {
-         if (!popupBrowser.exists().get()) throw new Error("Bitwig did not open its insertion browser.");
-         var contentTypes = arrayCopy(popupBrowser.contentTypeNames().get());
-         var contentType = String(params.contentType || "Devices");
-         var contentTypeIndex = contentTypes.indexOf(contentType);
-         if (contentTypeIndex < 0) throw new Error("Bitwig browser content type ‘" + contentType + "’ is unavailable. Available: " + contentTypes.join(", "));
-         popupBrowser.selectedContentTypeIndex().set(contentTypeIndex);
-         later(180, function() {
-            if (contentType === "Devices") {
-               resetBrowserFilters();
-               later(1000, function() {
-                  selectFilterValue(request, "device type", deviceTypeBank, params.deviceType, function() {
-                     selectFilterValue(request, "category", categoryBank, params.category, function() {
-                        selectFilterValue(request, "tag", tagBank, params.tag, function() {
-                           selectFilterValue(request, "file type", fileTypeBank, params.fileType, function() {
-                              selectFilterValue(request, "creator", creatorBank, params.creator, callback);
-                           });
-                        });
-                     });
+         if (!popupBrowser.exists().get()) throw new Error("Bitwig did not open its browser.");
+         resetBrowserFilters();
+         later(BROWSER_SETTLE_MS, function() {
+            selectFilterValue(request, "location", locationBank, filters.location, function() {
+               selectFilterValue(request, "device type", deviceTypeBank, filters.deviceType, function() {
+                  selectFilterValue(request, "category", categoryBank, filters.category, function() {
+                     later(BROWSER_SETTLE_MS, callback);
                   });
                });
-            } else {
-               resultBank.scrollPosition().set(0);
-               later(180, callback);
-            }
+            });
          });
       } catch (error) {
-         popupBrowser.cancel();
          finish(request, false, { message: String(error.message || error) });
       }
    });
 }
 
-function scanBrowserResults(request, query, exact, limit, callback) {
+// Scans all results (up to MAX_BROWSER_RESULTS). With `exact`, matches the
+// whole name (ignoring case); otherwise any name containing `query`. An empty
+// query matches everything.
+function scanBrowserResults(request, query, exact, callback) {
    var wanted = normalizeText(query);
    var total = Math.min(resultColumn.entryCount().get(), MAX_BROWSER_RESULTS);
    var matches = [];
@@ -859,7 +885,7 @@ function scanBrowserResults(request, query, exact, limit, callback) {
 
    function scanPage() {
       resultBank.scrollPosition().set(offset);
-      later(100, function() {
+      later(BROWSER_SCROLL_SETTLE_MS, function() {
          try {
             var pageCount = Math.min(BROWSER_PAGE, Math.max(0, total - offset));
             for (var i = 0; i < pageCount; i++) {
@@ -871,10 +897,9 @@ function scanBrowserResults(request, query, exact, limit, callback) {
                if (hit) matches.push({ resultIndex: offset + i, name: name });
             }
             offset += BROWSER_PAGE;
-            if (offset < total && (exact || matches.length < limit)) scanPage();
+            if (offset < total) scanPage();
             else callback(matches, resultColumn.entryCount().get());
          } catch (error) {
-            popupBrowser.cancel();
             finish(request, false, { message: String(error.message || error) });
          }
       });
@@ -883,47 +908,192 @@ function scanBrowserResults(request, query, exact, limit, callback) {
    scanPage();
 }
 
-function countDeviceName(name) {
-   var wanted = normalizeText(name);
-   var count = 0;
-   var total = Math.min(deviceBank.itemCount().get(), MAX_DEVICES);
-   for (var i = 0; i < total; i++) {
-      var item = deviceBank.getItemAt(i);
-      if (item.exists().get() && normalizeText(item.name().get()) === wanted) count++;
-   }
-   return count;
+function browserFilters(params) {
+   var filters = {};
+   if (params.location !== undefined) filters.location = String(params.location);
+   if (params.deviceType !== undefined) filters.deviceType = String(params.deviceType);
+   if (params.category !== undefined) filters.category = String(params.category);
+   return filters;
 }
 
-function handleFindDevices(request) {
+function handleBrowserSearch(request) {
    var params = request.params;
+   var query = String(params.query === undefined ? "" : params.query).trim();
+   var offset = Math.max(0, Math.floor(Number(params.offset || 0)));
+   var limit = Math.max(1, Math.min(MAX_BROWSER_REPLY, Math.floor(Number(params.limit || 50))));
+   var filters = browserFilters(params);
    selectTrack(request, params, function() {
-      prepareBrowser(request, params, function() {
-         scanBrowserResults(request, params.query, false, Number(params.limit || 50), function(matches, total) {
-            popupBrowser.cancel();
-            finish(request, true, {
-               session: "Devices",
-               presetSearch: false,
-               totalDevicesAfterFilters: total,
-               returned: Math.min(matches.length, Number(params.limit || 50)),
-               matches: matches.slice(0, Number(params.limit || 50))
+      var point = resolveInsertionPoint(params);
+      openBrowser(request, point.point, filters, function() {
+         scanBrowserResults(request, query, false, function(matches, total) {
+            var payload = {
+               filters: filters,
+               insertionPoint: point.description,
+               entriesAfterFilters: total,
+               matched: matches.length,
+               offset: offset,
+               returned: Math.max(0, Math.min(limit, matches.length - offset)),
+               results: matches.slice(offset, offset + limit).map(function(match) { return match.name; })
+            };
+            if (total > MAX_BROWSER_RESULTS) payload.note = "Only the first " + MAX_BROWSER_RESULTS + " entries were searched; narrow the filters.";
+            if (!params.includeFilters) {
+               finish(request, true, payload);
+               return;
+            }
+            readAllFilterOptions(locationBank, function(locations) {
+               readAllFilterOptions(deviceTypeBank, function(deviceTypes) {
+                  readAllFilterOptions(categoryBank, function(categories) {
+                     payload.availableFilters = { location: locations, deviceType: deviceTypes, category: categories };
+                     finish(request, true, payload);
+                  });
+               });
             });
          });
       });
    });
 }
 
-function handleFindSamples(request) {
+// ----------------------------------------------------------- Device insert
+
+// Where to insert on the selected track: the end of its device chain, or
+// right before one exact device. Call after selectTrack.
+function resolveInsertionPoint(params) {
+   var hasIndex = params.beforeDeviceIndex !== undefined && params.beforeDeviceIndex !== null;
+   var hasName = params.beforeDeviceName !== undefined && params.beforeDeviceName !== null;
+   if (hasIndex !== hasName) throw new Error("beforeDeviceIndex and beforeDeviceName go together.");
+   if (!hasIndex) {
+      return { point: cursorTrack.endOfDeviceChainInsertionPoint(), expectedIndex: deviceBank.itemCount().get(), description: "end of the device chain" };
+   }
+   var target = requireDevice({ deviceIndex: params.beforeDeviceIndex, deviceName: params.beforeDeviceName });
+   return {
+      point: target.beforeDeviceInsertionPoint(),
+      expectedIndex: Number(params.beforeDeviceIndex),
+      description: "before device " + params.beforeDeviceIndex + " ‘" + params.beforeDeviceName + "’"
+   };
+}
+
+// Waits until the device chain shows exactly one new device at expectedIndex
+// and check(device) has no complaint, then calls onDone(device). Otherwise
+// fails with what the chain holds.
+function awaitInsertedDevice(request, beforeNames, expectedIndex, check, onDone) {
+   var attempt = 0;
+   function poll() {
+      try {
+         var after = bankNames(deviceBank, MAX_DEVICES);
+         var index = insertedIndex(beforeNames, after);
+         var landed = index === expectedIndex || (index === null && after.length === beforeNames.length + 1);
+         var problem = landed ? check(deviceBank.getItemAt(expectedIndex)) : "no new device";
+         if (!problem) {
+            onDone(deviceBank.getItemAt(expectedIndex));
+            return;
+         }
+         if (attempt++ < INSERT_WAIT_ATTEMPTS) {
+            later(100, poll);
+            return;
+         }
+         var message;
+         if (landed) message = problem;
+         else if (after.length === beforeNames.length) message = "Bitwig did not insert anything; the device chain is unchanged.";
+         else message = "The device chain changed in an unexpected way: it was [" + beforeNames.join(", ") + "] and is now [" + after.join(", ") + "].";
+         finish(request, false, { message: message, devices: listDevicesNow().devices });
+      } catch (error) {
+         finish(request, false, { message: String(error.message || error) });
+      }
+   }
+   later(INSERT_FIRST_CHECK_MS, poll);
+}
+
+function requireRoomForDevice() {
+   if (deviceBank.itemCount().get() >= MAX_DEVICES) {
+      throw new Error("The track already has " + deviceBank.itemCount().get() + " devices, and Bitwig Agent Bridge can reach only " + MAX_DEVICES + ". Nothing was inserted.");
+   }
+}
+
+function insertionReply(request, device, index, point, source) {
+   var payload = {
+      inserted: deviceSnapshot(device, index),
+      insertionPoint: point.description,
+      source: source,
+      devices: listDevicesNow().devices
+   };
+   // Bitwig renames a track that still has its default name after the first
+   // instrument or sample lands on it (measured in Bitwig 6.1.7: "Inst 1"
+   // became "Ping" after loading Ping.aiff).
+   var trackName = cursorTrack.name().get();
+   if (trackName !== String(request.params.trackName)) {
+      payload.trackRenamedTo = trackName;
+      payload.note = "Bitwig renamed the track to ‘" + trackName + "’. Use that name in the next request.";
+   }
+   finish(request, true, payload);
+}
+
+function handleInsertDevice(request) {
    var params = request.params;
-   params.contentType = "Samples";
+   var sources = ["name", "bitwigId", "clapId", "vst3Id"];
+   var given = [];
+   for (var s = 0; s < sources.length; s++) if (params[sources[s]] !== undefined) given.push(sources[s]);
+   if (given.length !== 1) throw new Error("Pass exactly one of name, bitwigId, clapId or vst3Id.");
+   var source = given[0];
+   var id = String(params[source]).trim();
+   if (!id) throw new Error(source + " must not be empty.");
+   if (source === "bitwigId" && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      throw new Error("bitwigId must be a device UUID.");
+   }
+   if (source !== "name" && (params.location !== undefined || params.deviceType !== undefined || params.category !== undefined)) {
+      throw new Error("Browser filters only apply when inserting by name.");
+   }
    selectTrack(request, params, function() {
-      prepareBrowser(request, params, function() {
-         scanBrowserResults(request, params.query, false, Number(params.limit || 50), function(matches, total) {
-            popupBrowser.cancel();
-            finish(request, true, {
-               session: "Samples",
-               totalSamplesAfterFilters: total,
-               returned: Math.min(matches.length, Number(params.limit || 50)),
-               matches: matches.slice(0, Number(params.limit || 50))
+      requireRoomForDevice();
+      var point = resolveInsertionPoint(params);
+      var beforeNames = bankNames(deviceBank, MAX_DEVICES);
+      var described = {};
+      described[source] = id;
+      if (source !== "name") {
+         if (source === "bitwigId") point.point.insertBitwigDevice(java.util.UUID.fromString(id));
+         else if (source === "clapId") point.point.insertCLAPDevice(id);
+         else point.point.insertVST3Device(id);
+         awaitInsertedDevice(request, beforeNames, point.expectedIndex, function() { return ""; }, function(device) {
+            insertionReply(request, device, point.expectedIndex, point, described);
+         });
+         return;
+      }
+      var filters = browserFilters(params);
+      openBrowser(request, point.point, filters, function() {
+         scanBrowserResults(request, id, true, function(matches) {
+            if (matches.length === 0) {
+               throw new Error("The browser has no entry named exactly ‘" + id + "’ at the " + point.description +
+                  (filters.location ? " in location ‘" + filters.location + "’" : "") + ". Check the name with bitwig_browser_search.");
+            }
+            if (matches.length > 1) {
+               throw new Error("‘" + id + "’ matches " + matches.length + " browser entries, so nothing was inserted. " +
+                  "Narrow it with location (for example Devices, Presets or a plug-in folder), deviceType or category.");
+            }
+            var resultIndex = matches[0].resultIndex;
+            var pageOffset = Math.floor(resultIndex / BROWSER_PAGE) * BROWSER_PAGE;
+            resultBank.scrollPosition().set(pageOffset);
+            later(BROWSER_SCROLL_SETTLE_MS, function() {
+               try {
+                  var item = resultBank.getItemAt(resultIndex - pageOffset);
+                  if (!item.exists().get() || normalizeText(item.name().get()) !== normalizeText(id)) {
+                     throw new Error("The browser results changed before insertion. Nothing was inserted; try again.");
+                  }
+                  item.isSelected().set(true);
+                  later(BROWSER_SELECT_SETTLE_MS, function() {
+                     popupBrowser.commit();
+                     awaitInsertedDevice(request, beforeNames, point.expectedIndex, function(device) {
+                        // A device entry inserts a device of that name; a
+                        // preset entry inserts its device with that preset.
+                        var wanted = normalizeText(id);
+                        if (normalizeText(device.name().get()) === wanted || normalizeText(device.presetName().get()) === wanted) return "";
+                        return "Bitwig inserted ‘" + device.name().get() + "’" + (device.presetName().get() ? " (preset ‘" + device.presetName().get() + "’)" : "") +
+                           " at position " + point.expectedIndex + ", which is neither a device nor a preset named ‘" + id + "’. It is still in the chain.";
+                     }, function(device) {
+                        insertionReply(request, device, point.expectedIndex, point, described);
+                     });
+                  });
+               } catch (error) {
+                  finish(request, false, { message: String(error.message || error) });
+               }
             });
          });
       });
@@ -932,86 +1102,124 @@ function handleFindSamples(request) {
 
 function handleInsertSample(request) {
    var params = request.params;
-   params.contentType = "Samples";
-   selectTrack(request, params, function() {
-      var beforeCount = deviceBank.itemCount().get();
-      prepareBrowser(request, params, function() {
-         scanBrowserResults(request, params.exactName, true, 20, function(matches) {
-            if (matches.length === 0) {
-               popupBrowser.cancel();
-               finish(request, false, { message: "No indexed sample named exactly ‘" + params.exactName + "’ was found in Bitwig's Samples browser." });
-               return;
-            }
-            if (matches.length !== 1) {
-               popupBrowser.cancel();
-               finish(request, false, {
-                  message: "Sample insertion refused because ‘" + params.exactName + "’ has " + matches.length + " exact matches.",
-                  matches: matches
-               });
-               return;
-            }
-
-            var resultIndex = matches[0].resultIndex;
-            var pageOffset = Math.floor(resultIndex / BROWSER_PAGE) * BROWSER_PAGE;
-            var indexInPage = resultIndex - pageOffset;
-            resultBank.scrollPosition().set(pageOffset);
-            later(110, function() {
-               try {
-                  var item = resultBank.getItemAt(indexInPage);
-                  if (!item.exists().get() || normalizeText(item.name().get()) !== normalizeText(params.exactName)) {
-                     throw new Error("The Samples browser results changed before insertion. Nothing was loaded; try again.");
-                  }
-                  item.isSelected().set(true);
-                  later(80, function() {
-                     popupBrowser.commit();
-                     later(1000, function() {
-                        var afterCount = deviceBank.itemCount().get();
-                        if (afterCount <= beforeCount) {
-                           finish(request, false, { message: "Bitwig did not confirm a sampler device after loading the sample." });
-                           return;
-                        }
-                        var devices = listDevicesNow();
-                        var inserted = devices.devices[devices.devices.length - 1];
-                        finish(request, true, {
-                           insertedSample: params.exactName,
-                           session: "Samples",
-                           verifiedByDeviceChainReadback: true,
-                           sampler: inserted,
-                           devices: devices.devices
-                        });
-                     });
-                  });
-               } catch (error) {
-                  popupBrowser.cancel();
-                  finish(request, false, { message: String(error.message || error) });
-               }
-            });
-         });
+   var path = String(params.path || "");
+   if (path.charAt(0) !== "/" || !SAMPLE_FILE_PATTERN.test(path)) {
+      throw new Error("path must be an absolute path to a WAV, AIFF or FLAC file.");
+   }
+   selectTrack(request, params, function(track) {
+      // On an audio track Bitwig loads the file into a Convolution device as
+      // an impulse response instead of a sampler (measured in Bitwig 6.1.7).
+      var type = String(track.trackType().get());
+      if (type !== "Instrument" && type !== "Hybrid") {
+         throw new Error("Samples load into a sampler only on instrument or hybrid tracks; ‘" + track.name().get() + "’ has track type " + type + ".");
+      }
+      requireRoomForDevice();
+      var point = resolveInsertionPoint(params);
+      var beforeNames = bankNames(deviceBank, MAX_DEVICES);
+      point.point.insertFile(path);
+      awaitInsertedDevice(request, beforeNames, point.expectedIndex, function(device) {
+         return device.sampleName().get() ? "" : "Bitwig inserted ‘" + device.name().get() + "’ but reports no loaded sample. It is still in the chain.";
+      }, function(device) {
+         insertionReply(request, device, point.expectedIndex, point, { path: path });
       });
    });
 }
 
-function handleInsertSampleFile(request) {
-   var params = request.params;
-   var path = String(params.path || "");
-   if (path.charAt(0) !== "/" || !/\.(wav|aif|aiff|flac)$/i.test(path)) {
-      throw new Error("Sample path must be an absolute WAV, AIFF, or FLAC file path.");
+// ------------------------------------------------------ Device state and pages
+
+// Finds a remote-controls page by name (ignoring case) or index.
+function resolvePage(pageName, pageIndex) {
+   var pageNames = arrayCopy(cursorRemoteControlsPage.pageNames().get());
+   if (pageName !== undefined && pageIndex !== undefined) throw new Error("Pass a page name or a page index, not both.");
+   if (pageName !== undefined) {
+      for (var i = 0; i < pageNames.length; i++) {
+         if (normalizeText(pageNames[i]) === normalizeText(pageName)) return i;
+      }
+      throw new Error("The device has no remote-controls page ‘" + pageName + "’. Pages: " + (pageNames.join(", ") || "none") + ".");
    }
-   selectTrack(request, params, function() {
-      var beforeCount = deviceBank.itemCount().get();
-      cursorTrack.endOfDeviceChainInsertionPoint().insertFile(path);
-      later(1200, function() {
+   var index = Number(pageIndex);
+   if (!(index >= 0 && index < pageNames.length) || Math.floor(index) !== index) {
+      throw new Error("The device has no remote-controls page " + pageIndex + "; it has " + pageNames.length + ".");
+   }
+   return index;
+}
+
+function remoteControlsSnapshot() {
+   var pageNames = arrayCopy(cursorRemoteControlsPage.pageNames().get());
+   var selected = cursorRemoteControlsPage.selectedPageIndex().get();
+   var controls = [];
+   for (var i = 0; i < 8; i++) {
+      var control = cursorRemoteControlsPage.getParameter(i);
+      if (!control.exists().get()) continue;
+      controls.push({ index: i, name: control.name().get(), value: roundTo(control.get(), 4), display: control.displayedValue().get() });
+   }
+   return {
+      pageNames: pageNames,
+      pageIndex: selected,
+      pageName: selected >= 0 && selected < pageNames.length ? pageNames[selected] : "",
+      controls: controls
+   };
+}
+
+// Shows `pageIndex` (when not null) for reading or writing, and puts the
+// page the device showed before back when the request ends.
+function withRemotePage(request, pageIndex, callback) {
+   if (pageIndex === null || pageIndex === cursorRemoteControlsPage.selectedPageIndex().get()) {
+      callback();
+      return;
+   }
+   if (!request.remotePageRemembered) {
+      request.remotePageRemembered = true;
+      var original = cursorRemoteControlsPage.selectedPageIndex().get();
+      var previousCleanup = request.cleanup;
+      request.cleanup = function() {
+         if (original >= 0) cursorRemoteControlsPage.selectedPageIndex().set(original);
+         if (previousCleanup) previousCleanup();
+      };
+   }
+   cursorRemoteControlsPage.selectedPageIndex().set(pageIndex);
+   later(REMOTE_PAGE_SETTLE_MS, callback);
+}
+
+function handleSetDevice(request) {
+   var params = request.params;
+   var flags = ["enabled", "windowOpen", "expanded", "remoteControlsVisible"];
+   var changes = {};
+   var any = false;
+   for (var f = 0; f < flags.length; f++) {
+      if (params[flags[f]] !== undefined) {
+         changes[flags[f]] = Boolean(params[flags[f]]);
+         any = true;
+      }
+   }
+   var pageRequested = params.remoteControlsPage !== undefined || params.remoteControlsPageIndex !== undefined;
+   if (!any && !pageRequested) throw new Error("Nothing to change: pass enabled, windowOpen, expanded, remoteControlsVisible or a remote-controls page.");
+   selectDevice(request, params, function(device) {
+      var pageIndex = pageRequested ? resolvePage(params.remoteControlsPage, params.remoteControlsPageIndex) : null;
+      // Panel changes only show once the device is the one in Bitwig's editor.
+      var needsEditor = changes.expanded !== undefined || changes.remoteControlsVisible !== undefined || pageIndex !== null;
+      if (needsEditor) device.selectInEditor();
+      later(needsEditor ? EDITOR_SELECT_SETTLE_MS : 1, function() {
          try {
-            var afterCount = deviceBank.itemCount().get();
-            if (afterCount <= beforeCount) throw new Error("Bitwig did not create a sampler device from ‘" + path + "’. Nothing was inserted.");
-            var devices = listDevicesNow();
-            var inserted = devices.devices[devices.devices.length - 1];
-            if (!inserted || !inserted.sampleName) throw new Error("Bitwig created a device but did not confirm its loaded sample name.");
-            finish(request, true, {
-               insertedFile: path,
-               verifiedByDeviceChainReadback: true,
-               sampler: inserted,
-               devices: devices.devices
+            if (changes.enabled !== undefined) device.isEnabled().set(changes.enabled);
+            if (changes.windowOpen !== undefined) device.isWindowOpen().set(changes.windowOpen);
+            if (changes.expanded !== undefined) device.isExpanded().set(changes.expanded);
+            if (changes.remoteControlsVisible !== undefined) device.isRemoteControlsSectionVisible().set(changes.remoteControlsVisible);
+            if (pageIndex !== null) cursorRemoteControlsPage.selectedPageIndex().set(pageIndex);
+            verifyReadback(request, function() {
+               var problems = [];
+               if (changes.enabled !== undefined && device.isEnabled().get() !== changes.enabled) problems.push("enabled is " + device.isEnabled().get() + ", requested " + changes.enabled);
+               if (changes.windowOpen !== undefined && device.isWindowOpen().get() !== changes.windowOpen) problems.push("windowOpen is " + device.isWindowOpen().get() + ", requested " + changes.windowOpen);
+               if (changes.expanded !== undefined && device.isExpanded().get() !== changes.expanded) problems.push("expanded is " + device.isExpanded().get() + ", requested " + changes.expanded);
+               if (changes.remoteControlsVisible !== undefined && device.isRemoteControlsSectionVisible().get() !== changes.remoteControlsVisible) {
+                  problems.push("remoteControlsVisible is " + device.isRemoteControlsSectionVisible().get() + ", requested " + changes.remoteControlsVisible);
+               }
+               if (pageIndex !== null && cursorRemoteControlsPage.selectedPageIndex().get() !== pageIndex) {
+                  problems.push("remote-controls page is " + cursorRemoteControlsPage.selectedPageIndex().get() + ", requested " + pageIndex);
+               }
+               return problems.join("; ");
+            }, function() {
+               finish(request, true, { device: deviceSnapshot(device, Number(params.deviceIndex)), remoteControls: remoteControlsSnapshot() });
             });
          } catch (error) {
             finish(request, false, { message: String(error.message || error) });
@@ -1020,308 +1228,224 @@ function handleInsertSampleFile(request) {
    });
 }
 
-function handleInsertDevice(request) {
-   var params = request.params;
-   selectTrack(request, params, function() {
-      var beforeCount = deviceBank.itemCount().get();
-      var beforeOccurrences = countDeviceName(params.exactName);
-      prepareBrowser(request, params, function() {
-         scanBrowserResults(request, params.exactName, true, 20, function(matches) {
-            if (matches.length === 0) {
-               popupBrowser.cancel();
-               finish(request, false, { message: "No device named exactly ‘" + params.exactName + "’ was found in Bitwig's Devices browser." });
-               return;
-            }
-            if (matches.length !== 1) {
-               popupBrowser.cancel();
-               finish(request, false, {
-                  message: "Insertion refused because ‘" + params.exactName + "’ has " + matches.length + " exact device matches. Supply deviceType to disambiguate.",
-                  matches: matches
-               });
-               return;
-            }
+function directParameterSnapshot(id) {
+   return {
+      id: id,
+      name: directNames[id] || id,
+      value: directValues[id] === undefined ? null : roundTo(directValues[id], 4),
+      display: directDisplays[id] || ""
+   };
+}
 
-            var resultIndex = matches[0].resultIndex;
-            var pageOffset = Math.floor(resultIndex / BROWSER_PAGE) * BROWSER_PAGE;
-            var indexInPage = resultIndex - pageOffset;
-            resultBank.scrollPosition().set(pageOffset);
-            later(110, function() {
-               try {
-                  var item = resultBank.getItemAt(indexInPage);
-                  if (!item.exists().get() || normalizeText(item.name().get()) !== normalizeText(params.exactName)) {
-                     throw new Error("The Browser results changed before insertion. Nothing was loaded; try again.");
-                  }
-                  item.isSelected().set(true);
-                  later(80, function() {
-                     popupBrowser.commit();
-                     later(700, function() {
-                        var afterCount = deviceBank.itemCount().get();
-                        var afterOccurrences = countDeviceName(params.exactName);
-                        if (afterCount <= beforeCount || afterOccurrences <= beforeOccurrences) {
-                           finish(request, false, { message: "Bitwig did not confirm the new device in the chain. Refresh the device list before continuing." });
-                           return;
-                        }
-                        var devices = listDevicesNow();
-                        finish(request, true, {
-                           inserted: params.exactName,
-                           session: "Devices",
-                           presetLoaded: false,
-                           verifiedByDeviceChainReadback: true,
-                           devices: devices.devices
-                        });
-                     });
-                  });
-               } catch (error) {
-                  popupBrowser.cancel();
-                  finish(request, false, { message: String(error.message || error) });
+function handleDeviceParameters(request) {
+   var params = request.params;
+   selectDevice(request, params, function(device) {
+      var pageRequested = params.remoteControlsPage !== undefined || params.remoteControlsPageIndex !== undefined;
+      var pageIndex = pageRequested ? resolvePage(params.remoteControlsPage, params.remoteControlsPageIndex) : null;
+      withRemotePage(request, pageIndex, function() {
+         try {
+            var query = normalizeText(params.query || "");
+            var filtered = [];
+            for (var i = 0; i < directIds.length; i++) {
+               var parameter = directParameterSnapshot(directIds[i]);
+               if (!query || normalizeText(parameter.name).indexOf(query) !== -1) filtered.push(parameter);
+            }
+            var offset = Math.max(0, Math.floor(Number(params.offset || 0)));
+            var limit = Math.max(1, Math.min(MAX_PARAMETERS_PER_REPLY, Math.floor(Number(params.limit || 100))));
+            finish(request, true, {
+               device: deviceSnapshot(device, Number(params.deviceIndex)),
+               remoteControls: remoteControlsSnapshot(),
+               directParameters: {
+                  total: directIds.length,
+                  matched: filtered.length,
+                  offset: offset,
+                  returned: Math.max(0, Math.min(limit, filtered.length - offset)),
+                  parameters: filtered.slice(offset, offset + limit)
                }
             });
-         });
+         } catch (error) {
+            finish(request, false, { message: String(error.message || error) });
+         }
       });
    });
 }
 
-function handleInsertClapDevice(request) {
-   var params = request.params;
-   var clapId = String(params.clapId || "").trim();
-   if (!clapId) throw new Error("A CLAP plug-in ID is required.");
-   var hasBeforeIndex = params.beforeDeviceIndex !== undefined && params.beforeDeviceIndex !== null;
-   var hasBeforeName = params.beforeDeviceName !== undefined && params.beforeDeviceName !== null;
-   if (hasBeforeIndex !== hasBeforeName) {
-      throw new Error("beforeDeviceIndex and beforeDeviceName must be supplied together.");
-   }
-
-   selectTrack(request, params, function() {
-      try {
-         var beforeCount = deviceBank.itemCount().get();
-         var insertionPoint = cursorTrack.endOfDeviceChainInsertionPoint();
-         var insertedIndex = beforeCount;
-         var target = null;
-         if (hasBeforeIndex) {
-            target = requireDevice({
-               deviceIndex: params.beforeDeviceIndex,
-               deviceName: params.beforeDeviceName
-            });
-            insertedIndex = Number(params.beforeDeviceIndex);
-            insertionPoint = target.beforeDeviceInsertionPoint();
-         }
-         insertionPoint.insertCLAPDevice(clapId);
-         later(1200, function() {
-            try {
-            var afterCount = deviceBank.itemCount().get();
-            if (afterCount <= beforeCount) {
-               throw new Error("Bitwig did not insert the CLAP device ‘" + clapId + "’. The plug-in may not be available to the current engine.");
-            }
-            var devices = listDevicesNow();
-            finish(request, true, {
-               insertedClapId: clapId,
-               insertedBefore: target ? {
-                  index: Number(params.beforeDeviceIndex),
-                  name: String(params.beforeDeviceName)
-               } : null,
-               browserBypassed: true,
-               verifiedByDeviceChainReadback: true,
-               device: devices.devices[insertedIndex] || null,
-               devices: devices.devices
-            });
-            } catch (error) {
-               finish(request, false, { message: String(error.message || error) });
-            }
-         });
-      } catch (error) {
-         finish(request, false, { message: String(error.message || error) });
+// Validates the list of parameter changes. Each one addresses either a direct
+// parameter (parameterId) or a remote control (page by name or index, control
+// by name or index).
+function parseParameterChanges(list) {
+   if (!Array.isArray(list) || list.length === 0) throw new Error("parameters must list at least one change.");
+   if (list.length > MAX_PARAMETER_CHANGES) throw new Error("At most " + MAX_PARAMETER_CHANGES + " parameter changes per request.");
+   var changes = [];
+   for (var i = 0; i < list.length; i++) {
+      var item = list[i] || {};
+      var value = Number(item.value);
+      if (!(value >= 0 && value <= 1)) throw new Error("Change " + i + ": value must be a normalized number from 0 to 1.");
+      var direct = item.parameterId !== undefined;
+      var remote = item.page !== undefined || item.pageIndex !== undefined || item.control !== undefined || item.controlIndex !== undefined;
+      if (direct === remote) throw new Error("Change " + i + ": pass either parameterId or a remote control (page or pageIndex, and control or controlIndex).");
+      if (direct) {
+         changes.push({ kind: "direct", id: String(item.parameterId), value: value, index: i });
+         continue;
       }
-   });
+      if ((item.page === undefined) === (item.pageIndex === undefined)) throw new Error("Change " + i + ": pass page or pageIndex.");
+      if ((item.control === undefined) === (item.controlIndex === undefined)) throw new Error("Change " + i + ": pass control or controlIndex.");
+      changes.push({ kind: "remote", page: item.page, pageIndex: item.pageIndex, control: item.control, controlIndex: item.controlIndex, value: value, index: i });
+   }
+   return changes;
 }
 
-function handleInsertBitwigDevice(request) {
+function handleSetDeviceParameters(request) {
    var params = request.params;
-   var bitwigId = String(params.bitwigId || "").trim();
-   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(bitwigId)) {
-      throw new Error("A valid Bitwig device UUID is required.");
-   }
-
-   var hasBeforeIndex = params.beforeDeviceIndex !== undefined && params.beforeDeviceIndex !== null;
-   var hasBeforeName = params.beforeDeviceName !== undefined && params.beforeDeviceName !== null;
-   if (hasBeforeIndex !== hasBeforeName) {
-      throw new Error("beforeDeviceIndex and beforeDeviceName must be supplied together.");
-   }
-
-   selectTrack(request, params, function() {
-      try {
-         var beforeCount = deviceBank.itemCount().get();
-         var insertionPoint;
-         var target = null;
-         var insertedIndex = beforeCount;
-
-         if (hasBeforeIndex) {
-            target = requireDevice({
-               deviceIndex: params.beforeDeviceIndex,
-               deviceName: params.beforeDeviceName
-            });
-            insertedIndex = Number(params.beforeDeviceIndex);
-            insertionPoint = target.beforeDeviceInsertionPoint();
-         } else {
-            insertionPoint = cursorTrack.endOfDeviceChainInsertionPoint();
-         }
-
-         insertionPoint.insertBitwigDevice(java.util.UUID.fromString(bitwigId));
-         later(850, function() {
-            try {
-               var afterCount = deviceBank.itemCount().get();
-               if (afterCount <= beforeCount) {
-                  throw new Error("Bitwig did not insert stock device ‘" + bitwigId + "’ at the requested position.");
-               }
-               var devices = listDevicesNow();
-               finish(request, true, {
-                  insertedBitwigId: bitwigId,
-                  insertedBefore: target ? {
-                     index: Number(params.beforeDeviceIndex),
-                     name: String(params.beforeDeviceName)
-                  } : null,
-                  verifiedByDeviceChainReadback: true,
-                  device: devices.devices[insertedIndex] || null,
-                  devices: devices.devices
-               });
-            } catch (error) {
-               finish(request, false, { message: String(error.message || error) });
-            }
-         });
-      } catch (error) {
-         finish(request, false, { message: String(error.message || error) });
-      }
-   });
-}
-
-function handleNestDevice(request) {
-   var params = request.params;
-   selectTrack(request, params, function() {
-      try {
-         var parent = requireDevice({
-            deviceIndex: params.parentDeviceIndex,
-            deviceName: params.parentDeviceName
-         });
-         var child = requireDevice({
-            deviceIndex: params.childDeviceIndex,
-            deviceName: params.childDeviceName
-         });
-         if (Number(params.parentDeviceIndex) === Number(params.childDeviceIndex)) {
-            throw new Error("A device cannot be nested inside itself.");
-         }
-         var beforeCount = deviceBank.itemCount().get();
-         cursorDevice.selectDevice(parent);
-         later(180, function() {
-            try {
-               var slotNames = arrayCopy(cursorDevice.slotNames().get());
-               var requestedSlot = String(params.slotName || "Post FX");
-               if (slotNames.indexOf(requestedSlot) === -1) {
-                  throw new Error("Device ‘" + params.parentDeviceName + "’ does not expose the ‘" + requestedSlot + "’ slot. Available slots: " + slotNames.join(", "));
-               }
-               cursorDeviceSlot.selectInEditor();
-               later(140, function() {
-                  var currentSlot = cursorDeviceSlot.name().get();
-                  if (currentSlot && currentSlot !== requestedSlot) {
-                     finish(request, false, { message: "Bitwig selected slot ‘" + currentSlot + "’ instead of ‘" + requestedSlot + "’." });
-                     return;
-                  }
-                  cursorDeviceSlot.endOfDeviceChainInsertionPoint().moveDevices(child);
-                  later(850, function() {
-                  try {
-                     var topLevel = listDevicesNow();
-                     var nested = listNestedDevicesNow();
-                     if (topLevel.total !== beforeCount - 1) {
-                        throw new Error("Bitwig did not move ‘" + params.childDeviceName + "’ into the parent device. The top-level chain was left unchanged.");
-                     }
-                     var nestedBankVerified = nested.total >= 1 && nested.devices[0].name === String(params.childDeviceName);
-                     var cursorVerified = cursorDevice.exists().get() &&
-                        cursorDevice.name().get() === String(params.childDeviceName) &&
-                        cursorDevice.isNested().get();
-                     if (!nestedBankVerified && !cursorVerified) {
-                        throw new Error("Bitwig changed the chain but did not verify ‘" + params.childDeviceName + "’ inside ‘" + params.parentDeviceName + "’. Refresh before saving.");
-                     }
-                     parent.selectInEditor();
-                     finish(request, true, {
-                        nestedDevice: String(params.childDeviceName),
-                        parentDevice: String(params.parentDeviceName),
-                        slotName: requestedSlot,
-                        topLevel: topLevel,
-                        nested: nested,
-                        verifiedByDeviceChainReadback: nestedBankVerified,
-                        verifiedByNestedCursorReadback: cursorVerified
-                     });
-                  } catch (error) {
-                     finish(request, false, { message: String(error.message || error) });
-                  }
-                  });
-               });
-            } catch (error) {
-               finish(request, false, { message: String(error.message || error) });
-            }
-         });
-      } catch (error) {
-         finish(request, false, { message: String(error.message || error) });
-      }
-   });
-}
-
-// Bitwig's API can open the Save to Library dialog but can't see it or type
-// into it. Enter goes to whatever has keyboard focus, so it is only pressed
-// when the caller asks for it (confirm: true) and the same device is still
-// selected on the same track right before the key press.
-function handleSaveDevicePreset(request) {
-   var params = request.params;
-   if (!saveToLibraryAction) throw new Error("This Bitwig version has no Save to Library action, so the preset can't be saved from Bitwig Agent Bridge.");
+   var changes = parseParameterChanges(params.parameters);
    selectDevice(request, params, function(device) {
-      try {
-         var presetName = String(params.presetName || "").trim();
-         var confirm = params.confirm === true;
-         var trackName = cursorTrack.name().get();
-         var deviceName = device.name().get();
-         var devicePosition = device.position().get();
-         var presetNameBefore = device.presetName().get();
-         device.selectInEditor();
-         later(180, function() {
+      // Resolve every target before anything is written.
+      var byPage = {};
+      var pageOrder = [];
+      for (var c = 0; c < changes.length; c++) {
+         var change = changes[c];
+         if (change.kind === "direct") {
+            if (directIds.indexOf(change.id) === -1) throw new Error("Change " + change.index + ": the device has no parameter ‘" + change.id + "’. Read the IDs with bitwig_device_parameters.");
+            continue;
+         }
+         change.resolvedPage = resolvePage(change.page, change.pageIndex);
+         if (!byPage[change.resolvedPage]) {
+            byPage[change.resolvedPage] = [];
+            pageOrder.push(change.resolvedPage);
+         }
+         byPage[change.resolvedPage].push(change);
+      }
+      var seenTargets = {};
+      function claim(key, change) {
+         if (seenTargets[key] !== undefined) throw new Error("Changes " + seenTargets[key] + " and " + change.index + " set the same parameter.");
+         seenTargets[key] = change.index;
+      }
+      for (var d = 0; d < changes.length; d++) if (changes[d].kind === "direct") claim("direct:" + changes[d].id, changes[d]);
+
+      var results = [];
+      var problems = [];
+
+      // Resolves the controls of every page first (no writes), then writes.
+      function resolvePages(index, next) {
+         if (index >= pageOrder.length) {
+            next();
+            return;
+         }
+         var page = pageOrder[index];
+         withRemotePage(request, page, function() {
             try {
-               saveToLibraryAction.invoke();
-               later(700, function() {
-                  try {
-                     if (confirm) {
-                        var stillSelected = cursorTrack.name().get() === trackName &&
-                           cursorDevice.exists().get() &&
-                           cursorDevice.name().get() === deviceName &&
-                           cursorDevice.position().get() === devicePosition;
-                        if (!stillSelected) {
-                           throw new Error("The selection changed while Bitwig's Save to Library dialog was opening, so Enter was not pressed. Check Bitwig and close the dialog if it is open.");
-                        }
-                        application.enter();
+               var list = byPage[page];
+               for (var r = 0; r < list.length; r++) {
+                  var change = list[r];
+                  var controlIndex = -1;
+                  if (change.controlIndex !== undefined) {
+                     controlIndex = Number(change.controlIndex);
+                     if (!(controlIndex >= 0 && controlIndex < 8) || !cursorRemoteControlsPage.getParameter(controlIndex).exists().get()) {
+                        throw new Error("Change " + change.index + ": remote-controls page " + page + " has no control " + change.controlIndex + ".");
                      }
-                     later(450, function() {
-                        var presetNameAfter = device.presetName().get();
-                        finish(request, true, {
-                           device: deviceSnapshot(device, Number(params.deviceIndex)),
-                           requestedPresetName: presetName,
-                           saveToLibraryOpened: true,
-                           confirmationSent: confirm,
-                           presetNameBefore: presetNameBefore,
-                           presetNameAfter: presetNameAfter,
-                           note: confirm
-                              ? "Bitwig doesn't report whether the dialog saved. A changed presetNameAfter is a good sign; check the Library to be sure."
-                              : "The dialog is open in Bitwig. Type the name and press Save there.",
-                           nameEntryRequired: !confirm && !!presetName,
-                           suggestedPresetName: presetName || null
-                        });
-                     });
-                  } catch (error) {
-                     finish(request, false, { message: String(error.message || error) });
+                  } else {
+                     var names = [];
+                     for (var k = 0; k < 8; k++) {
+                        var candidate = cursorRemoteControlsPage.getParameter(k);
+                        if (!candidate.exists().get()) continue;
+                        names.push(candidate.name().get());
+                        if (normalizeText(candidate.name().get()) === normalizeText(change.control)) controlIndex = k;
+                     }
+                     if (controlIndex < 0) throw new Error("Change " + change.index + ": remote-controls page " + page + " has no control ‘" + change.control + "’. Controls: " + names.join(", ") + ".");
                   }
-               });
+                  change.resolvedControl = controlIndex;
+                  claim("remote:" + page + ":" + controlIndex, change);
+               }
+               resolvePages(index + 1, next);
+            } catch (error) {
+               finish(request, false, { message: String(error.message || error) + " Nothing was changed." });
+            }
+         });
+      }
+
+      function writePages(index, next) {
+         if (index >= pageOrder.length) {
+            next();
+            return;
+         }
+         var page = pageOrder[index];
+         withRemotePage(request, page, function() {
+            var list = byPage[page];
+            for (var w = 0; w < list.length; w++) cursorRemoteControlsPage.getParameter(list[w].resolvedControl).setImmediately(list[w].value);
+            later(PARAMETER_SETTLE_MS, function() {
+               try {
+                  var pageName = arrayCopy(cursorRemoteControlsPage.pageNames().get())[page];
+                  for (var v = 0; v < list.length; v++) {
+                     var control = cursorRemoteControlsPage.getParameter(list[v].resolvedControl);
+                     var actual = control.get();
+                     results.push({
+                        change: list[v].index, kind: "remoteControl", page: pageName, pageIndex: page, controlIndex: list[v].resolvedControl,
+                        name: control.name().get(), requested: list[v].value, value: roundTo(actual, 4), display: control.displayedValue().get()
+                     });
+                     if (differs(actual, list[v].value, PARAMETER_TOLERANCE)) {
+                        problems.push("‘" + control.name().get() + "’ on page ‘" + pageName + "’ is " + roundTo(actual, 4) + " (" + control.displayedValue().get() + "), requested " + list[v].value);
+                     }
+                  }
+                  writePages(index + 1, next);
+               } catch (error) {
+                  finish(request, false, { message: String(error.message || error) });
+               }
+            });
+         });
+      }
+
+      function writeDirect(next) {
+         var direct = [];
+         for (var i = 0; i < changes.length; i++) if (changes[i].kind === "direct") direct.push(changes[i]);
+         if (!direct.length) {
+            next();
+            return;
+         }
+         for (var j = 0; j < direct.length; j++) {
+            // Written through the exact device-bank item, so two devices with
+            // the same parameter IDs cannot be mixed up.
+            device.setDirectParameterValueNormalized(direct[j].id, Math.round(direct[j].value * (DIRECT_PARAMETER_RESOLUTION - 1)), DIRECT_PARAMETER_RESOLUTION);
+         }
+         later(PARAMETER_SETTLE_MS, function() {
+            try {
+               for (var k = 0; k < direct.length; k++) {
+                  var snapshot = directParameterSnapshot(direct[k].id);
+                  var actual = directValues[direct[k].id];
+                  results.push({ change: direct[k].index, kind: "direct", id: snapshot.id, name: snapshot.name, requested: direct[k].value, value: snapshot.value, display: snapshot.display });
+                  if (actual === undefined || differs(actual, direct[k].value, PARAMETER_TOLERANCE)) {
+                     var line = "‘" + snapshot.name + "’ is " + (actual === undefined ? "unreadable" : roundTo(actual, 4) + " (" + snapshot.display + ")") + ", requested " + direct[k].value;
+                     // Some VST3 parameters come back divided by 16384 (seen
+                     // in the original Control Deck). That is Bitwig scaling
+                     // the value twice; the bridge does not compensate.
+                     if (actual !== undefined && direct[k].value > 0.02 && Math.abs(actual * 16384 - direct[k].value) <= PARAMETER_TOLERANCE) {
+                        line += " (Bitwig scaled this plug-in parameter twice; set it through a remote control instead)";
+                     }
+                     problems.push(line);
+                  }
+               }
+               next();
             } catch (error) {
                finish(request, false, { message: String(error.message || error) });
             }
          });
-      } catch (error) {
-         finish(request, false, { message: String(error.message || error) });
       }
+
+      resolvePages(0, function() {
+         writeDirect(function() {
+            writePages(0, function() {
+               results.sort(function(a, b) { return a.change - b.change; });
+               if (problems.length) {
+                  finish(request, false, {
+                     message: "Bitwig did not confirm " + problems.length + " of " + changes.length + " parameter changes: " + problems.join("; ") +
+                        ". The others were written and confirmed. A parameter with fixed steps snaps to the nearest one.",
+                     parameters: results
+                  });
+                  return;
+               }
+               finish(request, true, { device: deviceSnapshot(device, Number(params.deviceIndex)), parameters: results });
+            });
+         });
+      });
    });
 }
 
@@ -3123,12 +3247,6 @@ function dispatch(request) {
             finish(request, true, snapshot);
          });
          return;
-      case "nest_device":
-         handleNestDevice(request);
-         return;
-      case "save_device_preset":
-         handleSaveDevicePreset(request);
-         return;
       case "write_clip":
          handleWriteClip(request);
          return;
@@ -3147,26 +3265,14 @@ function dispatch(request) {
       case "launch_scene":
          handleLaunchScene(request);
          return;
-      case "find_devices":
-         handleFindDevices(request);
+      case "browser_search":
+         handleBrowserSearch(request);
          return;
       case "insert_device":
          handleInsertDevice(request);
          return;
-      case "insert_bitwig_device":
-         handleInsertBitwigDevice(request);
-         return;
-      case "insert_clap_device":
-         handleInsertClapDevice(request);
-         return;
-      case "find_samples":
-         handleFindSamples(request);
-         return;
       case "insert_sample":
          handleInsertSample(request);
-         return;
-      case "insert_sample_file":
-         handleInsertSampleFile(request);
          return;
       case "delete_device":
          selectTrack(request, params, function() {
@@ -3178,271 +3284,14 @@ function dispatch(request) {
             }
          });
          return;
-      case "list_parameters":
-         selectDevice(request, params, function(device) {
-            var query = normalizeText(params.query || "");
-            var filtered = [];
-            for (var i = 0; i < directIds.length; i++) {
-               var parameter = parameterSnapshot(directIds[i]);
-               if (!query || normalizeText(parameter.name).indexOf(query) !== -1) filtered.push(parameter);
-            }
-            var offset = Math.max(0, Number(params.offset || 0));
-            var limit = Math.max(1, Math.min(200, Number(params.limit || 100)));
-            finish(request, true, {
-               device: deviceSnapshot(cursorDevice, Number(params.deviceIndex)),
-               totalDirectParameters: directIds.length,
-               matched: filtered.length,
-               offset: offset,
-               returned: Math.min(limit, Math.max(0, filtered.length - offset)),
-               parameters: filtered.slice(offset, offset + limit)
-            });
-         });
+      case "device_parameters":
+         handleDeviceParameters(request);
          return;
-      case "remote_controls":
-         selectDevice(request, params, function(device) {
-            var action = String(params.action || "status");
-            if (action !== "status" && action !== "show" && action !== "hide") {
-               throw new Error("Remote-controls action must be status, show, or hide.");
-            }
-            var pageNames = arrayCopy(cursorRemoteControlsPage.pageNames().get());
-            var requestedIndex = params.pageIndex === undefined ? null : Number(params.pageIndex);
-            if (params.pageName !== undefined) {
-               var requestedName = normalizeText(params.pageName);
-               requestedIndex = -1;
-               for (var pageIndex = 0; pageIndex < pageNames.length; pageIndex++) {
-                  if (normalizeText(pageNames[pageIndex]) === requestedName) {
-                     requestedIndex = pageIndex;
-                     break;
-                  }
-               }
-               if (requestedIndex < 0) {
-                  throw new Error("Remote-control page ‘" + params.pageName + "’ is not available on this device.");
-               }
-            }
-            if (requestedIndex !== null) {
-               if (!isFinite(requestedIndex) || requestedIndex < 0 || requestedIndex >= pageNames.length) {
-                  throw new Error("Remote-control page index " + requestedIndex + " is not available on this device.");
-               }
-            }
-
-            // The cursor can target a device for controller purposes without
-            // moving Bitwig's visible Device Panel editor. Select the exact
-            // bank item in the editor first, then reveal its native Remote
-            // Controls pane. Otherwise the host can select the requested page
-            // while leaving the plug-in's long generic parameter view onscreen.
-            if (action !== "status") device.selectInEditor();
-            later(action === "status" ? 1 : 120, function() {
-               try {
-                  if (action === "show") {
-                     // Collapse the device body and show only the eight
-                     // remote controls.
-                     device.isExpanded().set(false);
-                     device.isRemoteControlsSectionVisible().set(true);
-                  } else if (action === "hide") {
-                     device.isRemoteControlsSectionVisible().set(false);
-                  }
-                  if (requestedIndex !== null) cursorRemoteControlsPage.selectedPageIndex().set(requestedIndex);
-                  later(250, function() {
-                     finish(request, true, remoteControlsSnapshot());
-                  });
-               } catch (error) {
-                  finish(request, false, { message: String(error.message || error) });
-               }
-            });
-         });
+      case "set_device":
+         handleSetDevice(request);
          return;
-      case "selected_device_remote_controls":
-         try {
-            var selectedAction = String(params.action || "status");
-            var expectedSelectedName = String(params.deviceName || "").trim();
-            if (selectedAction !== "status" && selectedAction !== "show" && selectedAction !== "hide") {
-               throw new Error("Remote-controls action must be status, show, or hide.");
-            }
-            if (!cursorDevice.exists().get()) throw new Error("No Bitwig device is currently selected.");
-            if (expectedSelectedName && cursorDevice.name().get() !== expectedSelectedName) {
-               throw new Error("Safety check failed: the selected device is ‘" + cursorDevice.name().get() + "’, not ‘" + expectedSelectedName + "’.");
-            }
-            var selectedPageNames = arrayCopy(cursorRemoteControlsPage.pageNames().get());
-            var selectedPageIndex = params.pageIndex === undefined ? null : Number(params.pageIndex);
-            if (params.pageName !== undefined) {
-               var selectedRequestedName = normalizeText(params.pageName);
-               selectedPageIndex = -1;
-               for (var selectedIndex = 0; selectedIndex < selectedPageNames.length; selectedIndex++) {
-                  if (normalizeText(selectedPageNames[selectedIndex]) === selectedRequestedName) {
-                     selectedPageIndex = selectedIndex;
-                     break;
-                  }
-               }
-               if (selectedPageIndex < 0) {
-                  throw new Error("Remote-control page ‘" + params.pageName + "’ is not available on the selected device.");
-               }
-            }
-            if (selectedPageIndex !== null &&
-               (!isFinite(selectedPageIndex) || selectedPageIndex < 0 || selectedPageIndex >= selectedPageNames.length)) {
-               throw new Error("Remote-control page index " + selectedPageIndex + " is not available on the selected device.");
-            }
-            if (selectedAction !== "status") cursorDevice.selectInEditor();
-            later(selectedAction === "status" ? 1 : 120, function() {
-               try {
-                  if (selectedAction === "show") {
-                     // A nested device must remain expanded for Bitwig to draw
-                     // its Remote Controls section.
-                     cursorDevice.isExpanded().set(true);
-                     cursorDevice.isRemoteControlsSectionVisible().set(true);
-                  } else if (selectedAction === "hide") {
-                     cursorDevice.isRemoteControlsSectionVisible().set(false);
-                  }
-                  if (selectedPageIndex !== null) cursorRemoteControlsPage.selectedPageIndex().set(selectedPageIndex);
-                  later(250, function() {
-                     finish(request, true, {
-                        device: deviceSnapshot(cursorDevice, cursorDevice.position().get()),
-                        remoteControls: remoteControlsSnapshot()
-                     });
-                  });
-               } catch (error) {
-                  finish(request, false, { message: String(error.message || error) });
-               }
-            });
-         } catch (error) {
-            finish(request, false, { message: String(error.message || error) });
-         }
-         return;
-      case "set_remote_control":
-         selectDevice(request, params, function() {
-            var requested = Number(params.value);
-            if (!(requested >= 0 && requested <= 1)) {
-               finish(request, false, { message: "Normalized remote-control value must be between 0 and 1." });
-               return;
-            }
-            var pageNames = arrayCopy(cursorRemoteControlsPage.pageNames().get());
-            var pageIndex = params.pageIndex === undefined
-               ? pageNames.indexOf(String(params.pageName || ""))
-               : Number(params.pageIndex);
-            if (!(pageIndex >= 0 && pageIndex < pageNames.length)) {
-               finish(request, false, { message: "Remote Controls page was not found." });
-               return;
-            }
-            cursorRemoteControlsPage.selectedPageIndex().set(pageIndex);
-            later(200, function() {
-               var controlIndex = params.controlIndex === undefined ? -1 : Number(params.controlIndex);
-               if (controlIndex < 0 && params.controlName !== undefined) {
-                  var requestedName = String(params.controlName);
-                  for (var i = 0; i < 8; i++) {
-                     if (cursorRemoteControlsPage.getParameter(i).name().get() === requestedName) {
-                        controlIndex = i;
-                        break;
-                     }
-                  }
-               }
-               if (!(controlIndex >= 0 && controlIndex < 8)) {
-                  finish(request, false, { message: "Remote control was not found on page ‘" + pageNames[pageIndex] + "’." });
-                  return;
-               }
-               var control = cursorRemoteControlsPage.getParameter(controlIndex);
-               if (!control.exists().get()) {
-                  finish(request, false, { message: "The requested Remote Control slot is empty." });
-                  return;
-               }
-               control.setImmediately(requested);
-               later(400, function() {
-                  var actual = control.get();
-                  if (differs(actual, requested, 0.02)) {
-                     finish(request, false, {
-                        message: "Bitwig did not confirm ‘" + control.name().get() + "’: it reads " + actual +
-                           " (" + control.displayedValue().get() + "), requested " + requested +
-                           ". The control may snap to fixed steps."
-                     });
-                     return;
-                  }
-                  finish(request, true, {
-                     pageIndex: pageIndex,
-                     pageName: pageNames[pageIndex],
-                     controlIndex: controlIndex,
-                     controlName: control.name().get(),
-                     requestedNormalizedValue: requested,
-                     actualNormalizedValue: actual,
-                     displayValue: control.displayedValue().get(),
-                     verifiedByBitwigReadback: Math.abs(actual - requested) <= 0.02
-                  });
-               });
-            });
-         });
-         return;
-      case "set_parameter":
-         selectDevice(request, params, function(device) {
-            var id = String(params.parameterId);
-            if (directIds.indexOf(id) === -1) {
-               finish(request, false, { message: "Parameter ID ‘" + id + "’ is not exposed by the selected device. Refresh its parameters." });
-               return;
-            }
-            var requested = Number(params.value);
-            if (!(requested >= 0 && requested <= 1)) {
-               finish(request, false, { message: "Normalized parameter value must be between 0 and 1." });
-               return;
-            }
-            // Bitwig's bundled generic-device controllers use 128 here. It is
-            // also the portable resolution for VST3 direct parameters; larger
-            // resolutions are accepted by stock devices but some plug-ins
-            // apply their own second scaling pass.
-            var resolution = cursorDevice.name().get().indexOf("MatrixBrute") !== -1 &&
-               directNames[id] === "Preset" ? 256 : 128;
-            var scaledValue = Math.round(requested * (resolution - 1));
-            var parameterDevice = resolution === 256 ? cursorDevice : device;
-            // Write through the exact device-bank item, not the cursor. This
-            // matters when a chain contains several devices with the same
-            // name and identical parameter IDs (such as MatrixBrute CC banks).
-            parameterDevice.setDirectParameterValueNormalized(id, scaledValue, resolution);
-            later(400, function() {
-               var actual = directValues[id];
-               var difference = actual === undefined ? null : Math.abs(actual - requested);
-               var doubleNormalized = parameterDevice.isPlugin().get() &&
-                  requested > 0.02 && actual !== undefined && actual < 0.001 &&
-                  Math.abs((actual * 16384) - requested) <= 0.02;
-
-               function reply(mode, writtenValue) {
-                  actual = directValues[id];
-                  difference = actual === undefined ? null : Math.abs(actual - requested);
-                  if (!(actual !== undefined && difference <= 0.02)) {
-                     finish(request, false, {
-                        message: "Bitwig did not confirm parameter ‘" + (directNames[id] || id) + "’: it reads " +
-                           (actual === undefined ? "no value" : actual) + ", requested " + requested +
-                           ". The parameter may snap to fixed steps or ignore remote changes."
-                     });
-                     return;
-                  }
-                  finish(request, true, {
-                     parameter: parameterSnapshot(id),
-                     requestedNormalizedValue: requested,
-                     scaledIntegerValue: writtenValue,
-                     resolution: resolution,
-                     compatibilityMode: mode,
-                     actualNormalizedValue: actual,
-                     difference: difference,
-                     verifiedByBitwigReadback: actual !== undefined && difference <= 0.02
-                  });
-               }
-
-               if (!doubleNormalized) {
-                  reply("standard", scaledValue);
-                  return;
-               }
-
-               // Some nonlinear VST3 parameters are normalized a second time
-               // by Bitwig. Only compensate after readback proves that exact
-               // 1/16384 signature, then verify the compensated result again.
-               var compatibilityValue = scaledValue * 16384;
-               parameterDevice.setDirectParameterValueNormalized(id, compatibilityValue, resolution);
-               later(400, function() { reply("vst3-double-normalization", compatibilityValue); });
-            });
-         });
-         return;
-      case "open_device_window":
-         selectDevice(request, params, function() {
-            cursorDevice.isWindowOpen().set(true);
-            later(120, function() {
-               finish(request, true, { device: cursorDevice.name().get(), windowOpen: cursorDevice.isWindowOpen().get() });
-            });
-         });
+      case "set_device_parameters":
+         handleSetDeviceParameters(request);
          return;
       default:
          throw new Error("Unknown Bitwig Agent Bridge method: " + request.method);
@@ -3505,10 +3354,11 @@ function markDevice(device) {
    interested(device.name());
    interested(device.deviceType());
    interested(device.position());
-   interested(device.isNested());
    interested(device.isPlugin());
    interested(device.isEnabled());
    interested(device.isWindowOpen());
+   interested(device.isExpanded());
+   interested(device.isRemoteControlsSectionVisible());
    interested(device.presetName());
    interested(device.sampleName());
 }
@@ -3539,9 +3389,7 @@ function init() {
    interested(sceneBank.scrollPosition());
    cursorTrack = host.createCursorTrack("AGENT_BRIDGE_TRACK_CURSOR", "Agent Bridge Track Cursor", 0, MAX_SCENES, true);
    cursorDevice = cursorTrack.createCursorDevice();
-   cursorDeviceSlot = cursorDevice.getCursorSlot();
    cursorRemoteControlsPage = cursorDevice.createCursorRemoteControlsPage(8);
-   nestedDeviceBank = cursorDeviceSlot.createDeviceBank(MAX_DEVICES);
    effectTrackBank = host.createEffectTrackBank(MAX_EFFECT_TRACKS, 0);
    deviceBank = cursorTrack.createDeviceBank(MAX_DEVICES);
    launcherClip = host.createLauncherCursorClip(CLIP_GRID_WIDTH, CLIP_GRID_HEIGHT);
@@ -3558,8 +3406,6 @@ function init() {
    interested(cursorTrack.position());
    interested(deviceBank.itemCount());
    interested(deviceBank.scrollPosition());
-   interested(nestedDeviceBank.itemCount());
-   interested(nestedDeviceBank.scrollPosition());
    interested(cursorDevice.exists());
    interested(cursorDevice.name());
    interested(cursorDevice.deviceType());
@@ -3570,10 +3416,6 @@ function init() {
    interested(cursorDevice.isWindowOpen());
    interested(cursorDevice.presetName());
    interested(cursorDevice.sampleName());
-   interested(cursorDevice.hasSlots());
-   interested(cursorDevice.slotNames());
-   interested(cursorDeviceSlot.exists());
-   interested(cursorDeviceSlot.name());
    interested(cursorDevice.isExpanded());
    interested(cursorDevice.isRemoteControlsSectionVisible());
    interested(cursorRemoteControlsPage.getName());
@@ -3614,7 +3456,6 @@ function init() {
       for (var s = 0; s < MAX_SCENES; s++) markSlot(markedTrack.clipLauncherSlotBank().getItemAt(s));
    }
    for (var j = 0; j < MAX_DEVICES; j++) markDevice(deviceBank.getItemAt(j));
-   for (var nestedIndex = 0; nestedIndex < MAX_DEVICES; nestedIndex++) markDevice(nestedDeviceBank.getItemAt(nestedIndex));
    for (var cueMarkerIndex = 0; cueMarkerIndex < MAX_CUE_MARKERS; cueMarkerIndex++) {
       markCueMarker(cueMarkerBank.getItemAt(cueMarkerIndex));
    }
@@ -3642,64 +3483,29 @@ function init() {
    directDisplayObserver = cursorDevice.addDirectParameterValueDisplayObserver(256, function(id, value) {
       directDisplays[String(id)] = String(value);
    });
-   saveToLibraryAction = application.getAction("add_to_library");
    jumpToBeginningAction = application.getAction("jump_to_beginning_of_arrangement");
    popupBrowser = host.createPopupBrowser();
    resultColumn = popupBrowser.resultsColumn();
    resultBank = resultColumn.createItemBank(BROWSER_PAGE);
-   deviceTypeBank = popupBrowser.deviceTypeColumn().createItemBank(64);
-   categoryBank = popupBrowser.categoryColumn().createItemBank(64);
-   tagBank = popupBrowser.tagColumn().createItemBank(64);
-   fileTypeBank = popupBrowser.fileTypeColumn().createItemBank(64);
-   creatorBank = popupBrowser.creatorColumn().createItemBank(128);
+   locationBank = popupBrowser.locationColumn().createItemBank(BROWSER_FILTER_BANK);
+   deviceTypeBank = popupBrowser.deviceTypeColumn().createItemBank(BROWSER_FILTER_BANK);
+   categoryBank = popupBrowser.categoryColumn().createItemBank(BROWSER_FILTER_BANK);
 
    interested(popupBrowser.exists());
-   interested(popupBrowser.contentTypeNames());
-   interested(popupBrowser.selectedContentTypeIndex());
    interested(resultColumn.exists());
    interested(resultColumn.entryCount());
-   interested(popupBrowser.deviceTypeColumn().exists());
-   interested(popupBrowser.deviceTypeColumn().entryCount());
-   interested(popupBrowser.categoryColumn().exists());
-   interested(popupBrowser.categoryColumn().entryCount());
-   interested(popupBrowser.tagColumn().exists());
-   interested(popupBrowser.tagColumn().entryCount());
-   interested(popupBrowser.fileTypeColumn().exists());
-   interested(popupBrowser.fileTypeColumn().entryCount());
-   interested(popupBrowser.creatorColumn().exists());
-   interested(popupBrowser.creatorColumn().entryCount());
-   interested(popupBrowser.smartCollectionColumn().exists());
-   interested(popupBrowser.locationColumn().exists());
-   interested(popupBrowser.deviceColumn().exists());
    interested(resultBank.itemCount());
    interested(resultBank.scrollPosition());
-   interested(deviceTypeBank.itemCount());
-   interested(deviceTypeBank.scrollPosition());
-   interested(categoryBank.itemCount());
-   interested(categoryBank.scrollPosition());
-   interested(tagBank.itemCount());
-   interested(tagBank.scrollPosition());
-   interested(fileTypeBank.itemCount());
-   interested(fileTypeBank.scrollPosition());
-   interested(creatorBank.itemCount());
-   interested(creatorBank.scrollPosition());
-   interested(popupBrowser.deviceTypeColumn().getWildcardItem().isSelected());
-   interested(popupBrowser.categoryColumn().getWildcardItem().isSelected());
-   interested(popupBrowser.tagColumn().getWildcardItem().isSelected());
-   interested(popupBrowser.fileTypeColumn().getWildcardItem().isSelected());
-   interested(popupBrowser.creatorColumn().getWildcardItem().isSelected());
-   interested(popupBrowser.smartCollectionColumn().getWildcardItem().isSelected());
-   interested(popupBrowser.locationColumn().getWildcardItem().isSelected());
-   interested(popupBrowser.deviceColumn().getWildcardItem().isSelected());
-   for (var r = 0; r < BROWSER_PAGE; r++) markBrowserItem(resultBank.getItemAt(r));
-   for (var t = 0; t < 64; t++) {
-      markBrowserItem(deviceTypeBank.getItemAt(t));
-      markBrowserItem(categoryBank.getItemAt(t));
-      markBrowserItem(tagBank.getItemAt(t));
-      markBrowserItem(fileTypeBank.getItemAt(t));
-      markBrowserItem(creatorBank.getItemAt(t));
+   var filterBanks = [locationBank, deviceTypeBank, categoryBank];
+   for (var fb = 0; fb < filterBanks.length; fb++) {
+      interested(filterBanks[fb].itemCount());
+      interested(filterBanks[fb].scrollPosition());
+      for (var fi = 0; fi < BROWSER_FILTER_BANK; fi++) markBrowserItem(filterBanks[fb].getItemAt(fi));
    }
-   for (var c = 64; c < 128; c++) markBrowserItem(creatorBank.getItemAt(c));
+   var wildcardColumns = [popupBrowser.smartCollectionColumn(), popupBrowser.locationColumn(), popupBrowser.deviceColumn(),
+      popupBrowser.deviceTypeColumn(), popupBrowser.categoryColumn(), popupBrowser.tagColumn(), popupBrowser.fileTypeColumn(), popupBrowser.creatorColumn()];
+   for (var wc = 0; wc < wildcardColumns.length; wc++) interested(wildcardColumns[wc].getWildcardItem().isSelected());
+   for (var r = 0; r < BROWSER_PAGE; r++) markBrowserItem(resultBank.getItemAt(r));
 
    if (BRIDGE_TOKEN === "__BRIDGE" + "_TOKEN__") {
       host.showPopupNotification("Bitwig Agent Bridge has no auth token. Run `npm run setup` and reinstall the controller script.");

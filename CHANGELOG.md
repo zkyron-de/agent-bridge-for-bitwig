@@ -10,18 +10,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - `bitwig_set_track` replaces `bitwig_set_track_mix` and `bitwig_rename_track`. It sets name, color, volume and pan, mute, solo and arm, and send level, on/off and pre/post mode, on main tracks, effect tracks and the master track, and reads every value back. Volume and send levels are in dB and pan runs from −1 to 1, as Bitwig's mixer shows them.
 - `bitwig_tracks` also lists effect tracks and the master track, and gives each track its color, volume in dB, pan and sends.
+- `bitwig_browser_search`, `bitwig_set_device` and `bitwig_set_device_parameters`. The browser search filters by the browser's location column (devices, presets, a device's presets, plug-in folders), device type and category, at the end of a chain or before one device. `bitwig_set_device` sets enabled, plug-in window, expanded, remote controls shown and the page shown. `bitwig_set_device_parameters` sets up to 32 parameters per call by direct ID or remote control, checks every target before writing and reads every value back.
+- `bitwig_insert_device` inserts devices, Bitwig presets and plug-ins by exact browser name, or by `bitwigId`, `clapId` or `vst3Id`, at the end of the chain or before one device, and confirms the new device's name or preset. `bitwig_insert_sample` loads a file by path. `bitwig_device_parameters` returns the remote controls of any page together with the direct parameters. Device listings report `expanded` and `remoteControlsVisible`.
 
 ### Removed
 
 - `bitwig_set_track_mix` and `bitwig_rename_track` (see `bitwig_set_track`). The track list no longer carries `reference`, `volumeNormalized` or `panNormalized`.
 - `bitwig_clip_notes` and `bitwig_create_note_clip` (see Added). Per-note pressure is not offered because Bitwig does not keep a pressure written through the Controller API.
+- `bitwig_find_devices`, `bitwig_insert_stock_device`, `bitwig_insert_clap_device`, `bitwig_insert_sample_file`, `bitwig_remote_controls`, `bitwig_selected_device_remote_controls`, `bitwig_set_remote_control`, `bitwig_set_device_parameter` and `bitwig_open_device_window` (see Added). `bitwig_find_samples` and loading a sample by name: Bitwig 6 ignores switching its browser to the Samples tab through the API, so samples load by path only.
+- `bitwig_nest_device` and `bitwig_save_device_preset` (Save to Library needs keyboard input the API cannot give).
+- The local plug-in inventory: `bitwig_plugins`, `bitwig_refresh_plugin_index`, `npm run index:plugins` and `src/plugin-index.mjs`. Bitwig's browser lists the installed plug-ins.
+- Direct parameter writes no longer compensate a plug-in that reports the value divided by 16384, and the MatrixBrute special case is gone; the reply names the problem instead.
 
 - The Next.js dashboard (`dashboard/`), its local status service (`src/dashboard-server.mjs`, `src/local-http.mjs`), the macOS WebKit wrapper (`macos/`), the CoreMIDI auto-detect helper (`native/`), the double-click installer, `PORTING.md`, and the launchd agents that started them. No MCP tool used any of them.
 - The controller script no longer declares MIDI ports or a discovery pair, so Bitwig no longer auto-adds it; add it once in Settings → Controllers.
 
 ### Changed
 
-- The bridge reaches the first 64 main tracks and 16 effect tracks (was 128 and 32), with 8 sends per track.
+- The bridge reaches the first 64 main tracks and 16 effect tracks (was 128 and 32), with 8 sends per track, and 32 devices per track (was 64).
 - Renamed the project to **Bitwig Agent Bridge**: package and MCP server name `bitwig-agent-bridge`, controller script `controller/BitwigAgentBridge.control.js` (vendor and name "Bitwig Agent Bridge", new extension UUID), install folder `Controller Scripts/Bitwig Agent Bridge/`, wire protocol `bitwig-agent-bridge/1`, environment variables `BITWIG_AGENT_BRIDGE_HOST`, `_PORT` and `_TOKEN`, and request log `logs/bitwig-agent-bridge.jsonl`. The UDP port stays 50701. An installed Control Deck script does not talk to the renamed server; remove it from Bitwig and add Bitwig Agent Bridge instead.
 - The controller uses the non-deprecated five-argument `defineController` with an author.
 - The controller now targets Controller API 25 (Bitwig Studio 6, tested with 6.1.7) instead of 18. `bitwig_status` reports the requested and the host API version. The deprecated `Device.isParameterPageSectionVisible` is no longer used, so the remote-controls replies drop `parameterListVisible`, and cue markers are positioned with `SettableBeatTimeValue.set`.

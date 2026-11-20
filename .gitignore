@@ -5,4 +5,3 @@ logs/
 
 # Per-install secrets and generated data — never commit these.
 data/bridge-token
-data/plugin-index.json

@@ -4,7 +4,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { BitwigClient } from "./bitwig-client.mjs";
-import { buildPluginIndex, readPluginIndex, searchPluginIndex } from "./plugin-index.mjs";
 
 const client = new BitwigClient();
 const server = new McpServer({ name: "bitwig-agent-bridge", version: "1.2.1" });
@@ -129,42 +128,6 @@ server.registerTool("bitwig_track_meters", {
   })
 }, async args => call("track_meters", args));
 
-server.registerTool("bitwig_plugins", {
-  description: "Search the bridge's local inventory of installed VST3, VST2, Audio Unit, and CLAP plug-ins without opening Bitwig's Browser.",
-  inputSchema: {
-    query: z.string().default(""),
-    format: z.enum(["all", "VST3", "VST2", "AU", "CLAP"]).default("all"),
-    offset: z.number().int().nonnegative().default(0),
-    limit: z.number().int().min(1).max(200).default(80)
-  }
-}, async args => {
-  const startedAt = performance.now();
-  try {
-    const result = searchPluginIndex(await readPluginIndex(), args);
-    await writeLog({ method: "plugin_inventory", arguments: args, durationMs: Math.round(performance.now() - startedAt), success: true, response: { total: result.total, returned: result.plugins.length } });
-    return output(result);
-  } catch (error) {
-    await writeLog({ method: "plugin_inventory", arguments: args, durationMs: Math.round(performance.now() - startedAt), success: false, error: error.message });
-    return { content: [{ type: "text", text: error.message }], isError: true };
-  }
-});
-
-server.registerTool("bitwig_refresh_plugin_index", {
-  description: "Refresh the bridge's read-only plug-in inventory after installing or removing audio plug-ins.",
-  inputSchema: {}
-}, async () => {
-  const startedAt = performance.now();
-  try {
-    const index = await buildPluginIndex();
-    const result = { generatedAt: index.generatedAt, uniquePlugins: index.uniquePlugins, pluginBundles: index.pluginBundles, formatCounts: index.formatCounts };
-    await writeLog({ method: "refresh_plugin_inventory", arguments: {}, durationMs: Math.round(performance.now() - startedAt), success: true, response: result });
-    return output(result);
-  } catch (error) {
-    await writeLog({ method: "refresh_plugin_inventory", arguments: {}, durationMs: Math.round(performance.now() - startedAt), success: false, error: error.message });
-    return { content: [{ type: "text", text: error.message }], isError: true };
-  }
-});
-
 server.registerTool("bitwig_create_track", {
   description: "Create an empty Bitwig track without opening the Browser or loading any preset. Effect tracks live in a separate list and are returned with effectTrackIndex.",
   inputSchema: z.strictObject({
@@ -201,30 +164,98 @@ server.registerTool("bitwig_delete_track", {
 }, async args => call("delete_track", args));
 
 server.registerTool("bitwig_devices", {
-  description: "List devices on one exact track. This reads the device chain directly; it does not inspect presets.",
-  inputSchema: trackSelector
+  description: "List the top-level devices on one exact track (up to 32): index, exact name, type, plug-in or not, enabled, window open, expanded, remote controls shown, preset name and loaded sample.",
+  inputSchema: z.strictObject(trackSelector)
 }, async args => call("list_devices", args));
 
-server.registerTool("bitwig_nest_device", {
-  description: "Move one verified top-level device into another device’s native nested chain and verify the resulting parent and child chains.",
-  inputSchema: {
-    ...trackSelector,
-    parentDeviceIndex: z.number().int().nonnegative(),
-    parentDeviceName: z.string().min(1),
-    childDeviceIndex: z.number().int().nonnegative(),
-    childDeviceName: z.string().min(1),
-    slotName: z.string().min(1).default("Post FX")
-  }
-}, async args => call("nest_device", args, 15000));
+// Where a new device goes: the end of the chain, or right before one device.
+const insertBefore = {
+  beforeDeviceIndex: z.number().int().nonnegative().optional().describe("Insert right before this device (index from bitwig_devices); default is the end of the chain"),
+  beforeDeviceName: z.string().min(1).optional().describe("Exact name of that device; required with beforeDeviceIndex as a safety check")
+};
+const browserFilters = {
+  location: z.string().min(1).optional().describe("Exact entry of the browser's location column, e.g. 'Devices', 'Presets', a device name such as 'Polymer' for its presets, or a plug-in folder such as 'System VST 3 Plug-ins' or 'System CLAP Plug-ins'"),
+  deviceType: z.string().min(1).optional().describe("Exact device-type filter entry as Bitwig shows it (localized, e.g. 'Instrument', 'Audioeffekt')"),
+  category: z.string().min(1).optional().describe("Exact category filter entry, e.g. 'Bass'")
+};
 
-server.registerTool("bitwig_save_device_preset", {
-  description: "Open Bitwig’s native Save to Library dialog for one verified device. Bitwig's API can't type the name, so the dialog stays open for you unless confirm is true, which presses Enter to accept the prefilled name.",
-  inputSchema: {
+server.registerTool("bitwig_browser_search", {
+  description: "Search Bitwig's browser as it opens at a track's insertion point (end of chain, or before one device): devices, Bitwig presets and plug-ins, narrowed by location, device type and category. Returns entry names for bitwig_insert_device. Bitwig offers what fits that insertion point (an empty instrument track lists instruments). Samples cannot be reached through the browser; use bitwig_insert_sample with a file path.",
+  inputSchema: z.strictObject({
+    ...trackSelector,
+    ...insertBefore,
+    ...browserFilters,
+    query: z.string().default("").describe("Case-insensitive part of the name; empty lists everything after the filters"),
+    offset: z.number().int().nonnegative().default(0),
+    limit: z.number().int().min(1).max(200).default(50),
+    includeFilters: z.boolean().default(false).describe("Also return every available location, device type and category entry")
+  })
+}, async args => call("browser_search", args, 60000));
+
+server.registerTool("bitwig_insert_device", {
+  description: "Insert one device, Bitwig preset or plug-in on one exact track, at the end of the chain or right before one device. By default it is found in the browser by its exact name (use location/deviceType/category when a name has several entries; ambiguous names are refused). Expert alternative: a stable bitwigId, clapId or vst3Id. Success is reported only after the device chain shows the new device at the expected position with that name or preset. Bitwig may rename a track that still has its default name; the reply then carries trackRenamedTo.",
+  inputSchema: z.strictObject({
+    ...trackSelector,
+    ...insertBefore,
+    name: z.string().min(1).optional().describe("Exact browser entry name (device, preset or plug-in)"),
+    ...browserFilters,
+    bitwigId: z.string().uuid().optional().describe("Expert: Bitwig device UUID"),
+    clapId: z.string().min(1).optional().describe("Expert: CLAP plug-in ID, e.g. com.vital.synth"),
+    vst3Id: z.string().min(1).optional().describe("Expert: VST3 plug-in class ID")
+  })
+}, async args => call("insert_device", args, 60000));
+
+server.registerTool("bitwig_insert_sample", {
+  description: "Load an audio file (absolute path to WAV, AIFF or FLAC) as a new sampler device on one exact instrument or hybrid track, at the end of the chain or right before one device, and confirm Bitwig reports the loaded sample.",
+  inputSchema: z.strictObject({
+    ...trackSelector,
+    ...insertBefore,
+    path: z.string().min(1).describe("Absolute file path on this Mac")
+  })
+}, async args => call("insert_sample", args, 30000));
+
+const remotePage = {
+  remoteControlsPage: z.string().min(1).optional().describe("Remote-controls page by name"),
+  remoteControlsPageIndex: z.number().int().nonnegative().optional().describe("Remote-controls page by index")
+};
+
+server.registerTool("bitwig_set_device", {
+  description: "Change one exact device's state: enabled (bypass when false), plug-in window open, expanded, remote-controls section shown, and the remote-controls page shown. Every change is read back.",
+  inputSchema: z.strictObject({
     ...deviceSelector,
-    presetName: z.string().min(1).max(120),
-    confirm: z.boolean().default(false).describe("Press Enter to accept Bitwig's prefilled name. Only sent if the same device is still selected.")
-  }
-}, async args => call("save_device_preset", args, 15000));
+    enabled: z.boolean().optional(),
+    windowOpen: z.boolean().optional().describe("Open or close the plug-in window"),
+    expanded: z.boolean().optional(),
+    remoteControlsVisible: z.boolean().optional(),
+    ...remotePage
+  })
+}, async args => call("set_device", args, 15000));
+
+server.registerTool("bitwig_device_parameters", {
+  description: "Read one exact device's parameters: the eight remote controls of one page (default: the page shown; the page shown is restored afterwards) with page names, and the device's full direct parameter list (stable IDs, names, normalized values 0-1 and display text), filterable and paged.",
+  inputSchema: z.strictObject({
+    ...deviceSelector,
+    ...remotePage,
+    query: z.string().optional().describe("Case-insensitive part of a direct parameter name"),
+    offset: z.number().int().nonnegative().default(0),
+    limit: z.number().int().min(1).max(200).default(100)
+  })
+}, async args => call("device_parameters", args, 15000));
+
+server.registerTool("bitwig_set_device_parameters", {
+  description: "Set up to 32 parameters on one exact device in one call, each addressed either by direct parameter ID or by remote control (page by name or index, control by name or index), to a normalized value 0-1. All targets are checked before anything is written; every value is read back with its display text, and values Bitwig did not take are listed with what it holds. Direct parameters are written in 1/127 steps; remote controls take the full resolution. Parameters with fixed steps snap to the nearest one.",
+  inputSchema: z.strictObject({
+    ...deviceSelector,
+    parameters: z.array(z.strictObject({
+      parameterId: z.string().min(1).optional().describe("Direct parameter ID from bitwig_device_parameters"),
+      page: z.string().min(1).optional().describe("Remote-controls page name"),
+      pageIndex: z.number().int().nonnegative().optional(),
+      control: z.string().min(1).optional().describe("Remote control name on that page"),
+      controlIndex: z.number().int().min(0).max(7).optional(),
+      value: z.number().min(0).max(1).describe("Normalized value 0-1")
+    })).min(1).max(32)
+  })
+}, async args => call("set_device_parameters", args, 30000));
 
 server.registerTool("bitwig_write_clip", {
   description: "Create a launcher MIDI clip (or replace one with replace=true) on one exact track, set its name, length (as its loop) and color, write all its notes, and read the whole clip back. Any missing, changed or extra note or clip property fails the call with the exact differences. Slot = one past the last scene adds a new scene.",
@@ -290,132 +321,10 @@ server.registerTool("bitwig_launch_scene", {
   inputSchema: { slotIndex: z.number().int().min(0).max(1023).default(0) }
 }, async args => call("launch_scene", args));
 
-server.registerTool("bitwig_find_devices", {
-  description: "Search Bitwig's Devices browser only. Returns actual device names; presets are excluded by design.",
-  inputSchema: {
-    ...trackSelector,
-    query: z.string().min(1),
-    deviceType: z.string().min(1).optional().describe("Optional exact Bitwig filter, such as VST 3 or Bitwig"),
-    category: z.string().min(1).optional(),
-    limit: z.number().int().min(1).max(100).default(50)
-  }
-}, async args => call("find_devices", args, 15000));
-
-server.registerTool("bitwig_insert_device", {
-  description: "Insert one exact device at the end of an exact track. Only the Devices session is scanned; insertion is refused if the name is ambiguous.",
-  inputSchema: {
-    ...trackSelector,
-    exactName: z.string().min(1),
-    deviceType: z.string().min(1).optional().describe("Recommended when VST2/VST3/CLAP variants share a name"),
-    category: z.string().min(1).optional()
-  }
-}, async args => call("insert_device", args, 20000));
-
-server.registerTool("bitwig_insert_stock_device", {
-  description: "Insert a stock Bitwig device by its stable UUID, optionally immediately before one verified device. This supports valid note-processing positions that Bitwig's end-of-chain Browser omits.",
-  inputSchema: {
-    ...trackSelector,
-    bitwigId: z.string().guid().describe("Stable Bitwig device UUID"),
-    beforeDeviceIndex: z.number().int().nonnegative().optional().describe("Optional zero-based target device index"),
-    beforeDeviceName: z.string().min(1).optional().describe("Exact target device name; required with beforeDeviceIndex as a safety check")
-  }
-}, async args => call("insert_bitwig_device", args, 20000));
-
-server.registerTool("bitwig_insert_clap_device", {
-  description: "Insert a CLAP plug-in directly by its stable ID, optionally immediately before one verified device, bypassing Bitwig Browser filters and redundant-format hiding.",
-  inputSchema: {
-    ...trackSelector,
-    clapId: z.string().min(1).describe("Stable CLAP ID, such as org.surge-synth-team.surge-xt"),
-    beforeDeviceIndex: z.number().int().nonnegative().optional().describe("Optional zero-based target device index"),
-    beforeDeviceName: z.string().min(1).optional().describe("Exact target device name; required with beforeDeviceIndex as a safety check")
-  }
-}, async args => call("insert_clap_device", args, 20000));
-
-server.registerTool("bitwig_find_samples", {
-  description: "Search Bitwig's indexed Samples browser on one exact instrument track.",
-  inputSchema: {
-    ...trackSelector,
-    query: z.string().min(1),
-    limit: z.number().int().min(1).max(100).default(50)
-  }
-}, async args => call("find_samples", args, 20000));
-
-server.registerTool("bitwig_insert_sample", {
-  description: "Load one exact indexed sample into a new Bitwig Sampler device at the end of an exact instrument track.",
-  inputSchema: {
-    ...trackSelector,
-    exactName: z.string().min(1)
-  }
-}, async args => call("insert_sample", args, 25000));
-
-server.registerTool("bitwig_insert_sample_file", {
-  description: "Load an absolute WAV, AIFF, or FLAC file path into a new Bitwig Sampler device on an exact instrument track and verify the loaded sample name.",
-  inputSchema: {
-    ...trackSelector,
-    path: z.string().min(1)
-  }
-}, async args => call("insert_sample_file", args, 20000));
-
 server.registerTool("bitwig_delete_device", {
   description: "Delete one exact device. Both the track and device names must still match.",
-  inputSchema: deviceSelector
+  inputSchema: z.strictObject(deviceSelector)
 }, async args => call("delete_device", args));
-
-server.registerTool("bitwig_device_parameters", {
-  description: "Read a device's full direct parameter list, including third-party plug-ins, with stable IDs and current values.",
-  inputSchema: {
-    ...deviceSelector,
-    query: z.string().optional().describe("Optional case-insensitive parameter name filter"),
-    offset: z.number().int().nonnegative().default(0),
-    limit: z.number().int().min(1).max(200).default(100)
-  }
-}, async args => call("list_parameters", args, 10000));
-
-server.registerTool("bitwig_remote_controls", {
-  description: "Show Bitwig’s compact eight-knob Remote Controls section for one exact device, hide its long generic parameter list, and optionally select a named page.",
-  inputSchema: {
-    ...deviceSelector,
-    action: z.enum(["status", "show", "hide"]).default("status"),
-    pageName: z.string().min(1).optional(),
-    pageIndex: z.number().int().nonnegative().optional()
-  }
-}, async args => call("remote_controls", args, 10000));
-
-server.registerTool("bitwig_selected_device_remote_controls", {
-  description: "Show or hide the compact eight-knob Remote Controls section for the currently selected device, including a device nested inside another device.",
-  inputSchema: {
-    deviceName: z.string().min(1),
-    action: z.enum(["status", "show", "hide"]).default("status"),
-    pageName: z.string().min(1).optional(),
-    pageIndex: z.number().int().nonnegative().optional()
-  }
-}, async args => call("selected_device_remote_controls", args, 10000));
-
-server.registerTool("bitwig_set_remote_control", {
-  description: "Set one visible Bitwig Remote Control by page and control name, using the same native parameter path as the on-screen knobs, then verify the value.",
-  inputSchema: {
-    ...deviceSelector,
-    pageName: z.string().min(1).optional(),
-    pageIndex: z.number().int().nonnegative().optional(),
-    controlName: z.string().min(1).optional(),
-    controlIndex: z.number().int().min(0).max(7).optional(),
-    value: z.number().min(0).max(1)
-  }
-}, async args => call("set_remote_control", args, 10000));
-
-server.registerTool("bitwig_set_device_parameter", {
-  description: "Set one device parameter by its stable ID and verify the normalized value through Bitwig readback.",
-  inputSchema: {
-    ...deviceSelector,
-    parameterId: z.string().min(1).describe("Stable ID returned by bitwig_device_parameters"),
-    value: z.number().min(0).max(1).describe("Normalized value from 0 to 1")
-  }
-}, async args => call("set_parameter", args, 10000));
-
-server.registerTool("bitwig_open_device_window", {
-  description: "Open the native window for one exact device or plug-in.",
-  inputSchema: deviceSelector
-}, async args => call("open_device_window", args));
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

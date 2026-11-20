@@ -12,8 +12,7 @@
   "scripts": {
     "start": "node src/index.mjs",
     "setup": "node scripts/setup.mjs",
-    "index:plugins": "node src/plugin-index.mjs",
-    "check": "node --check src/index.mjs && node --check src/bitwig-client.mjs && node --check src/plugin-index.mjs && node --check scripts/setup.mjs && node --check controller/BitwigAgentBridge.control.js",
+    "check": "node --check src/index.mjs && node --check src/bitwig-client.mjs && node --check scripts/setup.mjs && node --check controller/BitwigAgentBridge.control.js",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {

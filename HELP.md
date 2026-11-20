@@ -127,7 +127,7 @@ Merge it into the file each one reads, then restart it or refresh its MCP list:
 
 ## MCP tool reference
 
-All 35 tools follow the same contract: **exact targets** (mutations require both index and current name; stale names are refused), **no preset loading** (only Bitwig's Devices browser is used), and **readback verification** (writes report the value Bitwig actually shows afterward).
+All 24 tools follow the same contract: **exact targets** (mutations require both index and current name; stale names are refused), **strict inputs** (unknown fields are rejected), and **readback verification** (a write succeeds only once Bitwig shows the requested value; otherwise the reply lists what it holds).
 
 ### Status & session
 
@@ -158,41 +158,23 @@ All 35 tools follow the same contract: **exact targets** (mutations require both
 
 ### Devices
 
-- **bitwig_devices** — List devices on one exact track (reads the chain directly; never inspects presets).
-- **bitwig_find_devices** — Search Bitwig's Devices browser only. Returns actual device names; presets are excluded by design.
-- **bitwig_insert_device** — Insert one exact device at the end of an exact track; refused if the name is ambiguous.
-- **bitwig_insert_stock_device** — Insert a stock Bitwig device by its stable UUID, optionally before a verified device — including note-processing positions the end-of-chain Browser omits.
-- **bitwig_insert_clap_device** — Insert a CLAP plug-in directly by its stable ID, bypassing Browser filters and redundant-format hiding.
-- **bitwig_nest_device** — Move one verified top-level device into another device's native nested chain and verify both chains.
-- **bitwig_save_device_preset** — Open Bitwig's native Save-to-Library flow for one verified device, without mouse automation.
+- **bitwig_devices** — List the top-level devices on one exact track (up to 32): name, type, plug-in or not, enabled, window open, expanded, remote controls shown, preset name and loaded sample.
+- **bitwig_browser_search** — Search Bitwig's browser as it opens at the end of a track's chain, or before one device: devices, Bitwig presets and plug-ins. Narrow it with `location` (an entry of the browser's location column, such as `Devices`, `Presets`, a device name like `Polymer` for its presets, or `System VST 3 Plug-ins` / `System CLAP Plug-ins`), `deviceType` and `category`. `includeFilters: true` also returns every available entry of those three columns.
+- **bitwig_insert_device** — Insert one device, preset or plug-in by its exact browser name, at the end of the chain or before one device (`beforeDeviceIndex` plus `beforeDeviceName`). A name with several entries is refused; narrow it with the same filters. Expert alternative: `bitwigId`, `clapId` or `vst3Id`. It succeeds only once the chain shows a new device at the expected position whose name, or preset name, is the requested one; otherwise the reply says what Bitwig inserted.
+- **bitwig_insert_sample** — Load a WAV, AIFF or FLAC file by absolute path into a new Sampler on an instrument or hybrid track, and confirm Bitwig reports the sample.
+- **bitwig_set_device** — Turn a device on or off, open or close its plug-in window, expand or collapse it, show or hide its remote controls, and pick the remote-controls page shown. Every change is read back.
 - **bitwig_delete_device** — Delete one exact device; both track and device names must still match. It succeeds only after Bitwig's device list shows the device gone and every other device in its place.
-- **bitwig_open_device_window** — Open the native window for one exact device or plug-in.
-
-### Samples
-
-- **bitwig_find_samples** — Search Bitwig's indexed Samples browser for one exact instrument track.
-- **bitwig_insert_sample** — Load one exact indexed sample into a new Sampler at the end of an instrument track.
-- **bitwig_insert_sample_file** — Load an absolute WAV/AIFF/FLAC path into a new Sampler and verify the loaded sample name.
 
 ### Parameters
 
-- **bitwig_device_parameters** — Read a device's full direct parameter list — third-party plug-ins included — with stable IDs and current values.
-- **bitwig_set_device_parameter** — Set one parameter by stable ID and verify the normalized value through readback.
-- **bitwig_remote_controls** — Show the compact eight-knob Remote Controls section for one exact device; optionally select a named page.
-- **bitwig_selected_device_remote_controls** — Show or hide Remote Controls for the currently selected device, including nested devices.
-- **bitwig_set_remote_control** — Set one visible Remote Control by page and control name via the same native path as the on-screen knobs, then verify.
-
-### Plug-in library
-
-- **bitwig_plugins** — Search the bridge's local inventory of installed VST3, VST2, AU, and CLAP plug-ins without opening Bitwig's Browser.
-- **bitwig_refresh_plugin_index** — Rebuild that inventory after installing or removing plug-ins.
+- **bitwig_device_parameters** — Read one device's eight remote controls of one page (the page shown, or one picked by name or index; the page shown before is restored), its page names, and its full direct parameter list (stable IDs, names, normalized 0–1 values and display text), filterable by `query` and paged.
+- **bitwig_set_device_parameters** — Set up to 32 parameters on one device at once, each by direct parameter ID or by remote control (page and control, by name or index), to a normalized value 0–1. Every target is checked before anything is written, every value is read back with its display text, and values Bitwig did not take are listed with what it holds. Direct parameters are written in 1/127 steps; remote controls take the full resolution.
 
 ## Files and locations
 
 | What | Where |
 |---|---|
 | Per-install secret | `<install>/data/bridge-token` |
-| Plug-in inventory | `<install>/data/plugin-index.json` |
 | MCP request log | `<install>/logs/bitwig-agent-bridge.jsonl` |
 | Controller script (installed copy) | `~/Documents/Bitwig Studio/Controller Scripts/Bitwig Agent Bridge/` |
 
@@ -208,11 +190,15 @@ Port (loopback-only): `50701/udp` bridge.
 
 **A tool says several tracks "are all named" the same.** The bridge does not use track IDs yet, so Bitwig Agent Bridge finds a track by its position and checks its name. When two tracks share a name, that check can't catch a track that moved, so tools refuse them. `bitwig_tracks` lists the clashing names under `duplicateNames`. Give each track a unique name, in Bitwig or with `bitwig_set_track` and `name`, which still works on duplicates and refuses a name another track already has.
 
-**Save to Library opened, but nothing was saved.** Bitwig's API can open the dialog but can't type into it, so `bitwig_save_device_preset` leaves the dialog open for you to name and save. With `confirm: true` it presses Enter to accept the prefilled name, and only when the same device is still selected. Compare `presetNameBefore` and `presetNameAfter` in the reply, then check the Library.
+**The selected track flickers while a tool runs.** Device, sample and clip tools work through Bitwig's selection, so they select their track for a moment. When the tool finishes, Bitwig Agent Bridge selects your track again, and your device too when the tool worked on that same track. Selection is left alone when your track moved or was deleted, and when you had the master, an effect track or a track past the first 64 selected. `bitwig_create_track` still leaves the new track selected.
 
-**The selected track flickers while a tool runs.** Device, sample and clip tools work through Bitwig's selection, so they select their track for a moment. When the tool finishes, Bitwig Agent Bridge selects your track again, and your device too when the tool worked on that same track. Selection is left alone when your track moved or was deleted, and when you had the master, an effect track or a track past the first 128 selected. `bitwig_create_track` still leaves the new track selected.
+**The browser does not offer a device or preset.** Bitwig's browser only lists what fits the insertion point: at the end of an empty instrument track it shows instruments, at the end of an audio track audio effects, before an instrument note effects. Search at the place you want to insert. A location that does not exist there is refused with the list of locations Bitwig offers.
 
-**Plug-in list is empty or stale.** Run `bitwig_refresh_plugin_index` or `npm run index:plugins`.
+**A sample is not found in the browser.** Bitwig's API cannot switch its browser to the Samples tab, so samples are loaded by file path with `bitwig_insert_sample`.
+
+**A track got renamed after inserting.** Bitwig names a track that still has its default name ("Inst 1") after the first instrument or sample on it. The reply then carries `trackRenamedTo`; use that name next.
+
+**A direct parameter ends up at a tiny value.** Some plug-ins report a value written through a direct parameter divided by 16384. The reply says so; set that parameter through a remote control instead.
 
 **"Bitwig's answer is … bytes, over the 60000-byte limit for one reply."** Each answer from Bitwig travels in one local network message, capped at 60,000 bytes. Ask for less at once: a smaller `limit`, an `offset`, or a `query` filter.
 
