@@ -2,67 +2,65 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { loadController, value } from "./support/load-controller.mjs";
 
-function setup(names) {
+// Tracks are found by channel id. In Bitwig 6.1.7 the id stays with a track
+// when it is renamed or moved, while default names follow the position.
+function setup(main, effects = ["FX 1"]) {
   const loaded = loadController();
   const { context } = loaded;
   context.dispatch = loaded.originalDispatch;
-  const items = names.map(name => ({ name }));
-  context.trackBank = {
-    itemCount: () => value(() => items.length),
-    getItemAt: index => ({
-      exists: () => value(() => Boolean(items[index])),
-      name: () => value(() => items[index].name),
-      setName: next => { items[index].name = next; },
-      selectInMixer: () => {}
-    })
-  };
-  context.trackSnapshot = (track, index) => ({ index, name: track.name().get() });
-  context.effectTrackBank = { itemCount: () => value(() => 0), getItemAt: () => ({ exists: () => value(() => false) }) };
-  context.masterTrack = { name: () => value(() => "Master") };
-  return { ...loaded, items };
+  const channel = (name, id) => ({
+    exists: () => value(() => true),
+    name: () => value(() => name),
+    channelId: () => value(() => id)
+  });
+  const mainItems = main.map((name, i) => channel(name, `main-${i}`));
+  const effectItems = effects.map((name, i) => channel(name, `fx-${i}`));
+  const bank = items => ({ itemCount: () => value(() => items.length), getItemAt: i => items[i] || { exists: () => value(() => false) } });
+  context.trackBank = bank(mainItems);
+  context.effectTrackBank = bank(effectItems);
+  context.masterTrack = channel("Master", "master");
+  context.trackSnapshot = (track, index) => ({ id: track.channelId().get(), index, name: track.name().get() });
+  return { ...loaded, mainItems };
 }
 
-test("tools refuse a track whose name another track shares", () => {
-  const { context, responses, advance } = setup(["Drums", "Audio", "Bass", "Audio"]);
-  context.enqueue(5000, "1", "set_track", { trackIndex: 3, trackName: "Audio", mute: true }, 5000);
+test("a track id finds its track even when other tracks share its name", () => {
+  const { context } = setup(["Audio", "Bass", "Audio"]);
+  const params = { trackId: "main-2" };
+  assert.equal(context.requireTrack(params), context.trackBank.getItemAt(2));
+  assert.deepEqual([params.trackKind, params.trackIndex, params.trackName], ["main", 2, "Audio"]);
+});
+
+test("a track id still finds the track after it moved", () => {
+  const { context, mainItems } = setup(["Inst 1", "Audio 2"]);
+  mainItems.reverse();
+  const params = { trackId: "main-1" };
+  context.requireTrack(params);
+  assert.equal(params.trackIndex, 0);
+});
+
+test("effect tracks and the master are found by id for tools that take them", () => {
+  const { context } = setup(["Drums"]);
+  assert.equal(context.requireChannel({ trackId: "fx-0" }).kind, "effect");
+  assert.equal(context.requireChannel({ trackId: "master" }).kind, "master");
+});
+
+test("main-track tools refuse an effect track or the master", () => {
+  const { context } = setup(["Drums"]);
+  assert.throws(() => context.requireTrack({ trackId: "fx-0" }), /main tracks only; ‘FX 1’ is an effect track/);
+  assert.throws(() => context.requireTrack({ trackId: "master" }), /the master track/);
+});
+
+test("an unknown track id is refused", () => {
+  const { context, responses, advance } = setup(["Drums"]);
+  context.enqueue(5000, "1", "set_track", { trackId: "gone", mute: true }, 5000);
   advance(1000);
   assert.equal(responses[0].ok, false);
-  assert.match(responses[0].payload.message, /Tracks 1, 3 are all named ‘Audio’/);
+  assert.match(responses[0].payload.message, /No track has the id ‘gone’.*Refresh with bitwig_tracks/);
 });
 
-test("a track with a unique name passes the check", () => {
-  const { context } = setup(["Drums", "Audio", "Bass", "Audio"]);
-  assert.equal(context.requireTrack({ trackIndex: 2, trackName: "Bass" }).name().get(), "Bass");
-});
-
-test("set_track can still rename a duplicate so the clash can be fixed", () => {
-  const { context, responses, advance, items } = setup(["Audio", "Audio"]);
-  context.enqueue(5000, "1", "set_track", { trackIndex: 1, trackName: "Audio", name: "Vox" }, 5000);
-  advance(1000);
-  assert.equal(responses[0].ok, true, JSON.stringify(responses[0].payload));
-  assert.deepEqual(items.map(i => i.name), ["Audio", "Vox"]);
-});
-
-test("set_track refuses a name another track already has", () => {
-  const { context, responses, advance, items } = setup(["Drums", "Bass"]);
-  context.enqueue(5000, "1", "set_track", { trackIndex: 1, trackName: "Bass", name: "Drums" }, 5000);
-  advance(1000);
-  assert.equal(responses[0].ok, false);
-  assert.match(responses[0].payload.message, /Track 0 is already named ‘Drums’/);
-  assert.deepEqual(items.map(i => i.name), ["Drums", "Bass"]);
-});
-
-test("set_track to its own current name is allowed", () => {
-  const { context, responses, advance } = setup(["Drums", "Bass"]);
-  context.enqueue(5000, "1", "set_track", { trackIndex: 1, trackName: "Bass", name: "Bass" }, 5000);
-  advance(1000);
-  assert.equal(responses[0].ok, true);
-});
-
-test("bitwig_tracks lists names that need fixing", () => {
-  const { context } = setup(["Audio", "Bass", "Audio", "Audio"]);
-  context.trackSnapshot = (track, index) => ({ index, name: track.name().get() });
-  const result = context.listTracks();
-  assert.deepEqual(JSON.parse(JSON.stringify(result.duplicateNames)), ["Audio"]);
-  assert.match(result.note, /bitwig_set_track/);
+test("bitwig_tracks lists ids and no longer flags shared names", () => {
+  const { context } = setup(["Audio", "Audio"]);
+  const result = JSON.parse(JSON.stringify(context.listTracks()));
+  assert.deepEqual(result.tracks.map(t => t.id), ["main-0", "main-1"]);
+  assert.equal(result.duplicateNames, undefined);
 });

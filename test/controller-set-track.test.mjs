@@ -6,7 +6,7 @@ import { loadController, value } from "./support/load-controller.mjs";
 // levels are raw amplitude roots (dB = 60 * log10(raw)), pan runs -1..1, and
 // setting a send level switches the send on. `ignore` lists fields Bitwig
 // should silently keep, to test the read-back.
-function fakeChannel(name, { type = "Audio", sends = [], ignore = [] } = {}) {
+function fakeChannel(name, { type = "Audio", sends = [], ignore = [], id = `id-${name}` } = {}) {
   const state = {
     name, color: [0.5, 0.5, 0.5], volume: 1, pan: 0, mute: false, solo: false, arm: false,
     sends: sends.map(target => ({ name: target, level: 0, enabled: false, mode: "AUTO" }))
@@ -29,6 +29,7 @@ function fakeChannel(name, { type = "Audio", sends = [], ignore = [] } = {}) {
   return {
     state,
     exists: () => value(() => true),
+    channelId: () => value(() => id),
     name: () => value(() => state.name),
     setName: next => { if (!keeps("name")) state.name = next; },
     trackType: () => value(() => type),
@@ -77,7 +78,7 @@ const plain = value => JSON.parse(JSON.stringify(value));
 test("set_track sets every field and reports what Bitwig reads back", () => {
   const { run, main } = setup();
   const response = run({
-    trackIndex: 1, trackName: "Bass", name: "Sub", color: "#3366CC", volumeDb: -6.5, pan: -0.3,
+    trackId: "id-Bass", name: "Sub", color: "#3366CC", volumeDb: -6.5, pan: -0.3,
     mute: true, solo: true, arm: true,
     sends: [{ sendIndex: 1, sendName: "Delay", levelDb: -12, enabled: false, mode: "PRE" }]
   });
@@ -94,11 +95,11 @@ test("set_track sets every field and reports what Bitwig reads back", () => {
 });
 
 test("set_track works on effect tracks and the master track", () => {
-  const effect = setup().run({ trackKind: "effect", trackIndex: 1, trackName: "Delay", volumeDb: -3, pan: 0.5 });
+  const effect = setup().run({ trackId: "id-Delay", volumeDb: -3, pan: 0.5 });
   assert.equal(effect.ok, true, JSON.stringify(effect.payload));
   assert.equal(effect.payload.track.volumeDb, -3);
   assert.equal(effect.payload.track.sends, undefined);
-  const master = setup().run({ trackKind: "master", trackIndex: 0, trackName: "Master", volumeDb: 6 });
+  const master = setup().run({ trackId: "id-Master", volumeDb: 6 });
   assert.equal(master.ok, true, JSON.stringify(master.payload));
   assert.equal(master.payload.track.volumeDb, 6);
 });
@@ -116,7 +117,7 @@ const keptFields = [
 
 for (const [field, change, message] of keptFields) {
   test(`set_track fails with what Bitwig holds when it keeps the ${field}`, () => {
-    const response = setup({ ignore: [field] }).run({ trackIndex: 1, trackName: "Bass", ...change });
+    const response = setup({ ignore: [field] }).run({ trackId: "id-Bass", ...change });
     assert.equal(response.ok, false);
     assert.match(response.payload.message, /^Bitwig did not confirm the change: /);
     assert.match(response.payload.message, message);
@@ -124,17 +125,16 @@ for (const [field, change, message] of keptFields) {
 }
 
 const refusals = [
-  ["arm on an effect track", { trackKind: "effect", trackIndex: 0, trackName: "Reverb", arm: true }, /Only main tracks can be armed/],
-  ["sends on the master track", { trackKind: "master", trackIndex: 0, trackName: "Master", sends: [{ sendIndex: 0, sendName: "Reverb", levelDb: -6 }] }, /Sends can only be set on main tracks/],
-  ["renaming the master track", { trackKind: "master", trackIndex: 0, trackName: "Master", name: "Main" }, /cannot be renamed/],
-  ["a send to a different effect track", { trackIndex: 0, trackName: "Drums", sends: [{ sendIndex: 0, sendName: "Delay", levelDb: -6 }] }, /send 0 goes to ‘Reverb’, not ‘Delay’/],
-  ["a send the track does not have", { trackIndex: 0, trackName: "Drums", sends: [{ sendIndex: 4, sendName: "X", levelDb: -6 }] }, /has no send 4/],
-  ["a send listed twice", { trackIndex: 0, trackName: "Drums", sends: [{ sendIndex: 0, sendName: "Reverb", levelDb: -6 }, { sendIndex: 0, sendName: "Reverb", mode: "PRE" }] }, /Send 0 is listed twice/],
-  ["a send above 0 dB", { trackIndex: 0, trackName: "Drums", sends: [{ sendIndex: 0, sendName: "Reverb", levelDb: 3 }] }, /Send level must be from -120 to 0 dB/],
-  ["a volume above +6 dB", { trackIndex: 0, trackName: "Drums", volumeDb: 7 }, /Track volume must be from -120 to 6 dB/],
-  ["an effect track name used twice", { trackKind: "effect", trackIndex: 1, trackName: "Delay", name: "Reverb" }, /Effect track 0 is already named ‘Reverb’/],
-  ["a stale track name", { trackIndex: 1, trackName: "Drums", mute: true }, /track 1 is now named ‘Bass’, not ‘Drums’/],
-  ["an empty change", { trackIndex: 1, trackName: "Bass" }, /Nothing to change/]
+  ["arm on an effect track", { trackId: "id-Reverb", arm: true }, /Only main tracks can be armed/],
+  ["sends on the master track", { trackId: "id-Master", sends: [{ sendIndex: 0, sendName: "Reverb", levelDb: -6 }] }, /Sends can only be set on main tracks/],
+  ["renaming the master track", { trackId: "id-Master", name: "Main" }, /cannot be renamed/],
+  ["a send to a different effect track", { trackId: "id-Drums", sends: [{ sendIndex: 0, sendName: "Delay", levelDb: -6 }] }, /send 0 goes to ‘Reverb’, not ‘Delay’/],
+  ["a send the track does not have", { trackId: "id-Drums", sends: [{ sendIndex: 4, sendName: "X", levelDb: -6 }] }, /has no send 4/],
+  ["a send listed twice", { trackId: "id-Drums", sends: [{ sendIndex: 0, sendName: "Reverb", levelDb: -6 }, { sendIndex: 0, sendName: "Reverb", mode: "PRE" }] }, /Send 0 is listed twice/],
+  ["a send above 0 dB", { trackId: "id-Drums", sends: [{ sendIndex: 0, sendName: "Reverb", levelDb: 3 }] }, /Send level must be from -120 to 0 dB/],
+  ["a volume above +6 dB", { trackId: "id-Drums", volumeDb: 7 }, /Track volume must be from -120 to 6 dB/],
+  ["an unknown track id", { trackId: "id-Gone", mute: true }, /No track has the id ‘id-Gone’/],
+  ["an empty change", { trackId: "id-Bass" }, /Nothing to change/]
 ];
 
 for (const [name, params, message] of refusals) {
@@ -148,10 +148,16 @@ for (const [name, params, message] of refusals) {
   });
 }
 
+test("set_track gives a track a name another track already has", () => {
+  const response = setup().run({ trackId: "id-Bass", name: "Drums" });
+  assert.equal(response.ok, true, JSON.stringify(response.payload));
+  assert.equal(response.payload.track.name, "Drums");
+});
+
 test("bitwig_tracks lists main tracks with sends, effect tracks and the master", () => {
   const { context } = setup();
   const result = plain(context.listTracks());
-  assert.deepEqual(result.tracks.map(t => t.name), ["Drums", "Bass"]);
+  assert.deepEqual(result.tracks.map(t => [t.id, t.name]), [["id-Drums", "Drums"], ["id-Bass", "Bass"]]);
   assert.deepEqual(result.tracks[0].sends.map(s => [s.index, s.name, s.levelDb, s.enabled, s.mode]), [[0, "Reverb", null, false, "AUTO"], [1, "Delay", null, false, "AUTO"]]);
   assert.deepEqual(result.effectTracks.map(t => [t.index, t.name, t.volumeDb]), [[0, "Reverb", 0], [1, "Delay", 0]]);
   assert.equal(result.master.name, "Master");

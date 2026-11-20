@@ -345,6 +345,7 @@ function sendSnapshot(send, index) {
 function trackSnapshot(track, index, kind) {
    kind = kind || "main";
    var state = {
+      id: track.channelId().get(),
       index: index,
       name: track.name().get(),
       type: track.trackType().get(),
@@ -387,23 +388,7 @@ function listTracks() {
       effectTracks: effectTracks, effectTracksTruncated: effectTotal > MAX_EFFECT_TRACKS,
       master: trackSnapshot(masterTrack, 0, "master")
    };
-   var duplicates = duplicateTrackNames(tracks).concat(duplicateTrackNames(effectTracks));
-   if (duplicates.length) {
-      result.duplicateNames = duplicates;
-      result.note = "Tools refuse tracks that share a name. Rename them with bitwig_set_track first.";
-   }
    return result;
-}
-
-function duplicateTrackNames(tracks) {
-   var seen = {};
-   var duplicates = [];
-   for (var i = 0; i < tracks.length; i++) {
-      var key = "=" + tracks[i].name;
-      seen[key] = Number(seen[key] || 0) + 1;
-      if (seen[key] === 2) duplicates.push(tracks[i].name);
-   }
-   return duplicates;
 }
 
 // Indices of the reachable tracks in a bank with exactly this name.
@@ -437,16 +422,62 @@ function readTrackMeters(resetAfterRead) {
    return { range: 128, meters: meters };
 }
 
-// A track is identified by index plus name. When two tracks share the name, a
-// shifted index could land on the wrong one and still pass, so such tracks are
-// refused unless the caller is renaming one of them.
+// Tools address tracks by Bitwig's channel id (Channel.channelId, API 20).
+// It stays the same when a track is renamed or moved (measured in Bitwig
+// 6.1.7), while default names such as "Inst 1" follow the position. Every
+// lookup searches the reachable main tracks, effect tracks and the master.
+function findChannelById(id) {
+   var banks = [
+      { kind: "main", bank: trackBank, limit: MAX_TRACKS },
+      { kind: "effect", bank: effectTrackBank, limit: MAX_EFFECT_TRACKS }
+   ];
+   for (var b = 0; b < banks.length; b++) {
+      var count = Math.min(banks[b].bank.itemCount().get(), banks[b].limit);
+      for (var i = 0; i < count; i++) {
+         var track = banks[b].bank.getItemAt(i);
+         if (track.exists().get() && track.channelId().get() === id) {
+            return { track: track, kind: banks[b].kind, bank: banks[b].bank, limit: banks[b].limit, index: i };
+         }
+      }
+   }
+   if (masterTrack.channelId().get() === id) return { track: masterTrack, kind: "master", bank: null, limit: 1, index: 0 };
+   return null;
+}
+
+// Resolves params.trackId and fills in trackKind, trackIndex and trackName
+// for the rest of the request. Called again on every use, so a track that
+// moves while a request runs is still found.
+function resolveTrackId(params) {
+   var id = String(params.trackId);
+   var found = findChannelById(id);
+   if (!found) {
+      throw new Error("No track has the id ‘" + id + "’. It was deleted, or it lies beyond the first " + MAX_TRACKS + " main or " + MAX_EFFECT_TRACKS + " effect tracks. Refresh with bitwig_tracks.");
+   }
+   params.trackKind = found.kind;
+   params.trackIndex = found.index;
+   params.trackName = found.track.name().get();
+   return found;
+}
+
+// The track a main-track tool works on: by trackId, or (inside the bridge
+// and its tests) by index plus name.
 function requireTrack(params, allowDuplicateName) {
+   if (params.trackId !== undefined) {
+      var found = resolveTrackId(params);
+      if (found.kind !== "main") {
+         throw new Error("This works on main tracks only; ‘" + params.trackName + "’ is " + (found.kind === "master" ? "the master track" : "an effect track") + ".");
+      }
+      return found.track;
+   }
    return requireChannel(params, allowDuplicateName).track;
 }
 
-// Like requireTrack, for params.trackKind "main" (default), "effect" or
-// "master". Returns { track, kind, bank, limit, index }.
+// Like requireTrack, for any track: by trackId, or by params.trackKind
+// ("main", "effect" or "master") with index and name. The index path refuses
+// tracks that share a name, because a shifted index could then land on the
+// wrong one. Returns { track, kind, bank, limit, index }.
 function requireChannel(params, allowDuplicateName) {
+   if (params.trackId !== undefined) return resolveTrackId(params);
    var kind = params.trackKind === undefined ? "main" : String(params.trackKind);
    var index = Number(params.trackIndex);
    if (kind === "master") {
@@ -514,7 +545,7 @@ function rememberSelection(request) {
          break;
       }
    }
-   // Master, effect tracks and tracks past the first 128 can't be selected again
+   // Master, effect tracks and tracks past the first 64 can't be selected again
    // from the main track list, so their selection is left where the tool put it.
    if (!saved) return;
    if (cursorDevice.exists().get() && !cursorDevice.isNested().get()) {
@@ -1877,14 +1908,21 @@ function handleCueMarkers(request) {
 
 // Names of the tracks or devices a bank shows, in order, for before/after
 // comparisons around a create or delete.
-function bankNames(bank, limit) {
+// The names (or, with keyOf, other keys) of a bank's reachable items.
+function bankNames(bank, limit, keyOf) {
    var count = Math.min(bank.itemCount().get(), limit);
    var names = [];
    for (var index = 0; index < count; index++) {
       var item = bank.getItemAt(index);
-      names.push(item.exists().get() ? String(item.name().get()) : null);
+      names.push(item.exists().get() ? String(keyOf ? keyOf(item) : item.name().get()) : null);
    }
    return names;
+}
+
+// Tracks are compared by channel id: Bitwig renumbers default track names
+// ("Inst 2" becomes "Inst 1") when a track before them goes away.
+function channelKey(track) {
+   return track.channelId().get();
 }
 
 // Where `after` equals `before` with one item inserted, returns that item's
@@ -1922,7 +1960,7 @@ function handleCreateTrack(request) {
    }
    var bank = effect ? effectTrackBank : trackBank;
    var limit = effect ? MAX_EFFECT_TRACKS : MAX_TRACKS;
-   var before = bankNames(bank, limit);
+   var before = bankNames(bank, limit, channelKey);
    if (bank.itemCount().get() >= limit) {
       throw new Error("The project already has " + bank.itemCount().get() + " " + (effect ? "effect" : "main") +
          " tracks, and Bitwig Agent Bridge can reach only the first " + limit + ". No track was created.");
@@ -1934,7 +1972,7 @@ function handleCreateTrack(request) {
    var attempt = 0;
    function locate() {
       try {
-         var after = bankNames(bank, limit);
+         var after = bankNames(bank, limit, channelKey);
          var index = insertedIndex(before, after);
          if (index !== -1 && index !== null) {
             nameTrack(index);
@@ -1944,12 +1982,8 @@ function handleCreateTrack(request) {
             later(100, locate);
             return;
          }
-         if (index === -1) {
-            throw new Error("Bitwig did not show exactly one new track in the " + (effect ? "effect" : "main") +
-               " track list, so the new track was left unnamed. Check the project with bitwig_tracks.");
-         }
-         throw new Error("Bitwig gave the new track the same name as the track next to it, " +
-            "so the bridge cannot tell which one is new. It was left unnamed.");
+         throw new Error("Bitwig did not show exactly one new track in the " + (effect ? "effect" : "main") +
+            " track list, so the new track was left unnamed. Check the project with bitwig_tracks.");
       } catch (error) {
          finish(request, false, { message: String(error.message || error) });
       }
@@ -1984,14 +2018,14 @@ function handleCreateTrack(request) {
 
 // Deletes one track or device and checks Bitwig's list afterwards: the item
 // must be gone and everything else must still be in the same order.
-function deleteAndVerify(request, bank, limit, index, item, deleted, what) {
-   var before = bankNames(bank, limit);
+function deleteAndVerify(request, bank, limit, index, item, deleted, what, keyOf) {
+   var before = bankNames(bank, limit, keyOf);
    var totalBefore = bank.itemCount().get();
    item.deleteObject();
    var attempt = 0;
    function verify() {
       try {
-         var after = bankNames(bank, limit);
+         var after = bankNames(bank, limit, keyOf);
          var removed = totalBefore - bank.itemCount().get();
          if (!isRemovedRun(before, after, index, removed)) {
             if (attempt++ < 20) {
@@ -2049,12 +2083,6 @@ function parseTrackChanges(params, target) {
       var name = String(params.name).trim();
       if (!name || name.length > 120) throw new Error("Track name must contain 1 to 120 characters.");
       if (target.kind === "master") throw new Error("The master track cannot be renamed.");
-      var taken = trackIndicesNamed(name, target.bank, target.limit);
-      for (var t = 0; t < taken.length; t++) {
-         if (taken[t] !== target.index) {
-            throw new Error((target.kind === "effect" ? "Effect track " : "Track ") + taken[t] + " is already named ‘" + name + "’. Pick a unique name so tools can tell the tracks apart.");
-         }
-      }
       changes.name = name;
       any = true;
    }
@@ -2784,7 +2812,7 @@ function handleReadClip(request) {
                   return;
                }
                finish(request, true, {
-                  track: { index: params.trackIndex, name: params.trackName },
+                  track: { id: params.trackId, index: params.trackIndex, name: params.trackName },
                   clip: state,
                   stepsPerBeat: stepsPerBeat,
                   note: "Note starts are read on a 1/" + stepsPerBeat + "-beat grid; a note between two steps reads back at the step it starts in.",
@@ -2846,7 +2874,7 @@ function handleWriteClip(request) {
                   }
                   verifyClip(request, slot, slotIndex, stepsPerBeat, Math.max(lengthBeats, properties.loop.startBeats + properties.loop.lengthBeats), notes, properties, function(actual) {
                      finish(request, true, {
-                        track: { index: params.trackIndex, name: params.trackName },
+                        track: { id: params.trackId, index: params.trackIndex, name: params.trackName },
                         clip: clipState(slot, slotIndex),
                         stepsPerBeat: stepsPerBeat,
                         notesWritten: notes.length,
@@ -2942,7 +2970,7 @@ function handleEditClip(request) {
                      }
                      verifyClip(request, slot, slotIndex, stepsPerBeat, readEnd, plan.expected, properties, function(actual) {
                         finish(request, true, {
-                           track: { index: params.trackIndex, name: params.trackName },
+                           track: { id: params.trackId, index: params.trackIndex, name: params.trackName },
                            clip: clipState(slot, slotIndex),
                            stepsPerBeat: stepsPerBeat,
                            notesCreated: plan.created,
@@ -3371,6 +3399,7 @@ function scanScenes(request, start, end, onScene, done) {
 
 function launcherTrackState(entry) {
    return {
+      id: entry.track.channelId().get(),
       index: entry.index,
       name: entry.track.name().get(),
       stopped: entry.track.isStopped().get(),
@@ -3381,9 +3410,9 @@ function launcherTrackState(entry) {
 function handleLauncher(request) {
    var params = request.params;
    var tracks = mainTracks();
-   if (params.trackIndex !== undefined) {
-      requireTrack(params);
-      tracks = [{ index: Number(params.trackIndex), track: trackBank.getItemAt(Number(params.trackIndex)) }];
+   if (params.trackId !== undefined || params.trackIndex !== undefined) {
+      var only = requireTrack(params);
+      tracks = [{ index: Number(params.trackIndex), track: only }];
    }
    var sceneCount = sceneBank.itemCount().get();
    var start = Math.min(Math.max(0, Math.floor(Number(params.sceneOffset || 0))), sceneCount);
@@ -3398,6 +3427,7 @@ function handleLauncher(request) {
             var slot = slotOf(tracks[t].index);
             if (!slot.hasContent().get()) continue;
             entry.clips.push({
+               trackId: tracks[t].track.channelId().get(),
                trackIndex: tracks[t].index,
                trackName: tracks[t].track.name().get(),
                name: slot.name().get(),
@@ -3549,6 +3579,60 @@ function handleDeleteScene(request) {
    });
 }
 
+// One delete tool for tracks, devices, scenes and launcher clips. Each target
+// is checked by id or name before deletion and confirmed afterwards.
+var DELETE_FIELDS = {
+   track: ["trackId"],
+   device: ["trackId", "deviceIndex", "deviceName"],
+   scene: ["sceneIndex", "sceneName"],
+   clip: ["trackId", "slotIndex", "clipName"]
+};
+
+function handleDelete(request) {
+   var params = request.params;
+   var what = String(params.what);
+   var needed = DELETE_FIELDS[what];
+   if (!needed) throw new Error("what must be track, device, scene or clip.");
+   var allowed = ["what"].concat(needed);
+   for (var key in params) {
+      if (allowed.indexOf(key) === -1 && params[key] !== undefined) throw new Error("Deleting a " + what + " takes " + needed.join(", ") + "; not " + key + ".");
+   }
+   for (var n = 0; n < needed.length; n++) {
+      if (params[needed[n]] === undefined) throw new Error("Deleting a " + what + " needs " + needed.join(", ") + ".");
+   }
+
+   if (what === "track") {
+      var target = requireChannel(params);
+      if (target.kind === "master") throw new Error("The master track cannot be deleted.");
+      deleteAndVerify(request, target.bank, target.limit, target.index, target.track, trackSnapshot(target.track, target.index, target.kind), "track", channelKey);
+      return;
+   }
+   if (what === "device") {
+      selectTrack(request, params, function() {
+         var device = requireDevice(params);
+         deleteAndVerify(request, deviceBank, MAX_DEVICES, Number(params.deviceIndex), device, deviceSnapshot(device, Number(params.deviceIndex)), "device");
+      });
+      return;
+   }
+   if (what === "scene") {
+      handleDeleteScene(request);
+      return;
+   }
+   var track = requireTrack(params);
+   var slotIndex = requireSlotIndex(params.slotIndex, "Clip");
+   withSceneSlot(request, track, slotIndex, function(slot) {
+      if (!slot.hasContent().get()) throw new Error("Slot " + slotIndex + " on ‘" + params.trackName + "’ holds no clip.");
+      var name = slot.name().get();
+      if (name !== String(params.clipName)) throw new Error("Safety check failed: the clip in slot " + slotIndex + " on ‘" + params.trackName + "’ is now named ‘" + name + "’, not ‘" + params.clipName + "’. Nothing was deleted.");
+      slot.deleteObject();
+      verifyReadback(request, function() {
+         return slot.hasContent().get() ? "slot " + slotIndex + " still holds ‘" + slot.name().get() + "’" : "";
+      }, function() {
+         finish(request, true, { deleted: { trackId: params.trackId, trackName: params.trackName, slotIndex: slotIndex, name: name } });
+      });
+   });
+}
+
 function launchOption(value, allowed, label) {
    var option = value === undefined ? "default" : String(value);
    if (allowed.indexOf(option) === -1) throw new Error(label + " must be one of " + allowed.join(", ") + ".");
@@ -3588,13 +3672,13 @@ function handleLaunch(request) {
    var params = request.params;
    var action = params.action === undefined ? "launch" : String(params.action);
    var hasScene = params.sceneIndex !== undefined || params.sceneName !== undefined;
-   var hasTrack = params.trackIndex !== undefined || params.trackName !== undefined;
+   var hasTrack = params.trackId !== undefined || params.trackIndex !== undefined || params.trackName !== undefined;
    var hasSlot = params.slotIndex !== undefined;
 
    if (action === "launch") {
       var quantization = launchOption(params.quantization, LAUNCH_QUANTIZATIONS, "quantization");
       var launchMode = launchOption(params.launchMode, LAUNCH_MODES, "launchMode");
-      if (hasScene === (hasTrack || hasSlot)) throw new Error("Launch a scene (sceneIndex and sceneName) or a clip (trackIndex, trackName and slotIndex).");
+      if (hasScene === (hasTrack || hasSlot)) throw new Error("Launch a scene (sceneIndex and sceneName) or a clip (trackId and slotIndex).");
       if (hasScene) {
          withScene(request, params, function(scene, sceneIndex) {
             var entries = [];
@@ -3612,7 +3696,7 @@ function handleLaunch(request) {
          });
          return;
       }
-      if (!hasTrack || !hasSlot) throw new Error("A clip launch needs trackIndex, trackName and slotIndex.");
+      if (!hasTrack || !hasSlot) throw new Error("A clip launch needs trackId and slotIndex.");
       var track = requireTrack(params);
       var slotIndex = requireSlotIndex(params.slotIndex, "Clip");
       withSceneSlot(request, track, slotIndex, function(slot) {
@@ -3628,9 +3712,9 @@ function handleLaunch(request) {
 
    if (action !== "stop" && action !== "returnToArrangement") throw new Error("action must be launch, stop or returnToArrangement.");
    if (hasScene || hasSlot || params.quantization !== undefined || params.launchMode !== undefined) {
-      throw new Error(action + " works on one track (trackIndex and trackName) or, without them, on all tracks; it takes no scene, slot or launch options.");
+      throw new Error(action + " works on one track (trackId) or, without it, on all tracks; it takes no scene, slot or launch options.");
    }
-   var targets = hasTrack ? [{ index: Number(params.trackIndex), track: requireTrack(params) }] : mainTracks();
+   var targets = hasTrack ? [{ track: requireTrack(params), index: Number(params.trackIndex) }] : mainTracks();
    for (var i = 0; i < targets.length; i++) {
       if (action === "stop") targets[i].track.stop();
       else if (hasTrack) targets[i].track.returnToArrangement();
@@ -3867,14 +3951,13 @@ function dispatch(request) {
       case "set_track":
          handleSetTrack(request);
          return;
-      case "delete_track":
-         var track = requireTrack(params);
-         deleteAndVerify(request, trackBank, MAX_TRACKS, Number(params.trackIndex), track, trackSnapshot(track, Number(params.trackIndex)), "track");
+      case "delete":
+         handleDelete(request);
          return;
       case "list_devices":
          selectTrack(request, params, function() {
             var snapshot = listDevicesNow();
-            snapshot.track = { index: params.trackIndex, name: params.trackName };
+            snapshot.track = { id: params.trackId, index: params.trackIndex, name: params.trackName };
             finish(request, true, snapshot);
          });
          return;
@@ -3899,9 +3982,6 @@ function dispatch(request) {
       case "launch":
          handleLaunch(request);
          return;
-      case "delete_scene":
-         handleDeleteScene(request);
-         return;
       case "browser_search":
          handleBrowserSearch(request);
          return;
@@ -3910,16 +3990,6 @@ function dispatch(request) {
          return;
       case "insert_sample":
          handleInsertSample(request);
-         return;
-      case "delete_device":
-         selectTrack(request, params, function() {
-            try {
-               var device = requireDevice(params);
-               deleteAndVerify(request, deviceBank, MAX_DEVICES, Number(params.deviceIndex), device, deviceSnapshot(device, Number(params.deviceIndex)), "device");
-            } catch (error) {
-               finish(request, false, { message: String(error.message || error) });
-            }
-         });
          return;
       case "device_parameters":
          handleDeviceParameters(request);
@@ -3936,6 +4006,7 @@ function dispatch(request) {
 }
 
 function markTrack(track) {
+   interested(track.channelId());
    interested(track.exists());
    interested(track.name());
    interested(track.trackType());

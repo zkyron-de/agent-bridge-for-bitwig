@@ -19,7 +19,7 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 ## Design rules
 
 - Devices, Bitwig presets and plug-ins are inserted by their exact browser name; samples by file path.
-- Track and device mutations require both the index and the exact current name.
+- Tracks are addressed by Bitwig's track id, which survives renaming and moving; devices, scenes and clips by index plus their exact current name.
 - Device insertion is refused when an exact name has multiple matches, unless a browser location, device-type or category filter disambiguates it.
 - Third-party parameters use Bitwig's stable direct parameter IDs and are paged to keep messages small.
 - Parameter writes report Bitwig's observed value after the change.

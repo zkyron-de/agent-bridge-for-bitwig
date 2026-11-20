@@ -38,6 +38,11 @@ function setup({ scenes: sceneSpecs = 12, tracks: trackNames = ["Keys", "Bass"],
       color: () => colorValue(() => [0.2, 0.4, 0.8]),
       isPlaying: () => is("playing"), isPlaybackQueued: () => is("queued"), isStopQueued: () => is("stopQueued"),
       isRecording: () => is("recording"), isRecordingQueued: () => is("recordingQueued"),
+      deleteObject: () => {
+        const i = state.position + local;
+        log.push(["deleteClip", t, i]);
+        if (!ignore.includes("deleteClip")) later(() => { delete scenes[i].clips[t]; });
+      },
       launchWithOptions: (q, m) => {
         const target = clip();
         log.push(["launchClip", t, state.position + local, q, m]);
@@ -70,6 +75,7 @@ function setup({ scenes: sceneSpecs = 12, tracks: trackNames = ["Keys", "Bass"],
   const tracks = trackNames.map((name, t) => ({
     exists: () => value(() => true),
     name: () => value(() => name),
+    channelId: () => value(() => `id-${name}`),
     isStopped: () => value(() => !scenes.some(s => s.clips[t] && s.clips[t].state === "playing")),
     isQueuedForStop: () => value(() => scenes.some(s => s.clips[t] && s.clips[t].state === "stopQueued")),
     clipLauncherSlotBank: () => ({ getItemAt: local => slot(t, local) }),
@@ -77,6 +83,8 @@ function setup({ scenes: sceneSpecs = 12, tracks: trackNames = ["Keys", "Bass"],
     returnToArrangement: () => { log.push(["return", t]); later(() => stopTrack(t)); }
   }));
   context.trackBank = { itemCount: () => value(() => tracks.length), getItemAt: i => tracks[i] };
+  context.effectTrackBank = { itemCount: () => value(() => 0), getItemAt: () => ({ exists: () => value(() => false) }) };
+  context.masterTrack = { channelId: () => value(() => "id-master"), name: () => value(() => "Master") };
   context.sceneBank = { itemCount: () => value(() => scenes.length), scrollPosition: () => scrollPosition, getItemAt: scene };
   context.project = { createScene: () => { log.push(["create"]); later(() => scenes.push({ name: "", color: [0x49 / 255, 0x49 / 255, 0x49 / 255], clips: {} })); } };
   context.transport = { returnToArrangement: () => { log.push(["transportReturn"]); later(() => trackNames.forEach((_, t) => stopTrack(t))); } };
@@ -113,7 +121,7 @@ test("launcher reads the last scenes when Bitwig stops scrolling at the last ful
 
 test("launcher pages over scenes and narrows to one track", () => {
   const { run } = setup({ scenes: 20, clips: { "0:5": "A", "1:5": "B", "0:15": "C" } });
-  const response = run("launcher", { trackIndex: 1, trackName: "Bass", sceneOffset: 4, sceneLimit: 3 });
+  const response = run("launcher", { trackId: "id-Bass", sceneOffset: 4, sceneLimit: 3 });
   assert.equal(response.ok, true, JSON.stringify(response.payload));
   assert.deepEqual(plain(response.payload.scenes.map(s => [s.index, s.clips.map(c => c.name)])), [[4, []], [5, ["B"]], [6, []]]);
   assert.deepEqual(plain(response.payload.tracks.map(t => t.name)), ["Bass"]);
@@ -168,9 +176,9 @@ for (const [name, params, message] of sceneRefusals) {
   });
 }
 
-test("delete_scene removes one exact scene and checks the next one moved up", () => {
+test("delete removes one exact scene and checks the next one moved up", () => {
   const { run, scenes } = setup({ scenes: 4, clips: { "0:1": "A", "0:2": "B", "1:2": "C" } });
-  const response = run("delete_scene", { sceneIndex: 1, sceneName: "Scene 2" });
+  const response = run("delete", { what: "scene", sceneIndex: 1, sceneName: "Scene 2" });
   assert.equal(response.ok, true, JSON.stringify(response.payload));
   assert.equal(scenes.length, 3);
   assert.equal(response.payload.deleted.clipCount, 1);
@@ -189,21 +197,21 @@ test("launch starts every clip of a scene past the first eight", () => {
 
 test("launch starts one clip with Bitwig's default options", () => {
   const { run, log } = setup({ clips: { "1:3": "Bassline" } });
-  const response = run("launch", { trackIndex: 1, trackName: "Bass", slotIndex: 3 });
+  const response = run("launch", { trackId: "id-Bass", slotIndex: 3 });
   assert.equal(response.ok, true, JSON.stringify(response.payload));
   assert.deepEqual(plain(log), [["launchClip", 1, 3, "default", "default"]]);
   assert.equal(response.payload.launched.state, "queued");
 });
 
 test("launch fails when Bitwig does not start the clip", () => {
-  const response = setup({ clips: { "1:3": "Bassline" }, ignore: ["launch"] }).run("launch", { trackIndex: 1, trackName: "Bass", slotIndex: 3 });
+  const response = setup({ clips: { "1:3": "Bassline" }, ignore: ["launch"] }).run("launch", { trackId: "id-Bass", slotIndex: 3 });
   assert.equal(response.ok, false);
   assert.match(response.payload.message, /Bitwig did not start the clip: ‘Bass’ slot 3 is stopped/);
 });
 
 test("stop stops one track and accepts a stop that waits for the bar", () => {
   const { run, log } = setup({ clips: { "0:1": { name: "A", state: "playing" }, "1:1": { name: "B", state: "playing" } } });
-  const response = run("launch", { action: "stop", trackIndex: 0, trackName: "Keys" });
+  const response = run("launch", { action: "stop", trackId: "id-Keys" });
   assert.equal(response.ok, true, JSON.stringify(response.payload));
   assert.deepEqual(plain(log), [["stop", 0]]);
   assert.deepEqual(plain(response.payload.tracks.map(t => [t.name, t.stopQueued])), [["Keys", true]]);
@@ -224,12 +232,12 @@ test("returnToArrangement on all tracks goes through the transport", () => {
 
 const launchRefusals = [
   ["a scene without clips", { sceneIndex: 4, sceneName: "Scene 5" }, /Scene 4 has no clips on the tracks the bridge reaches; nothing was launched/],
-  ["an empty slot", { trackIndex: 0, trackName: "Keys", slotIndex: 4 }, /Slot 4 on ‘Keys’ is empty; nothing was launched/],
-  ["a scene and a clip at once", { sceneIndex: 0, sceneName: "Scene 1", trackIndex: 0, trackName: "Keys", slotIndex: 0 }, /Launch a scene .* or a clip/],
-  ["an unknown quantization", { trackIndex: 0, trackName: "Keys", slotIndex: 0, quantization: "3" }, /quantization must be one of default, none/],
-  ["a stop with a slot", { action: "stop", trackIndex: 0, trackName: "Keys", slotIndex: 0 }, /takes no scene, slot or launch options/],
-  ["a slot above 1023", { trackIndex: 0, trackName: "Keys", slotIndex: 1024 }, /from 0 to 1023/],
-  ["a stale track name", { trackIndex: 0, trackName: "Lead", slotIndex: 0 }, /track 0 is now named ‘Keys’, not ‘Lead’/]
+  ["an empty slot", { trackId: "id-Keys", slotIndex: 4 }, /Slot 4 on ‘Keys’ is empty; nothing was launched/],
+  ["a scene and a clip at once", { sceneIndex: 0, sceneName: "Scene 1", trackId: "id-Keys", slotIndex: 0 }, /Launch a scene .* or a clip/],
+  ["an unknown quantization", { trackId: "id-Keys", slotIndex: 0, quantization: "3" }, /quantization must be one of default, none/],
+  ["a stop with a slot", { action: "stop", trackId: "id-Keys", slotIndex: 0 }, /takes no scene, slot or launch options/],
+  ["a slot above 1023", { trackId: "id-Keys", slotIndex: 1024 }, /from 0 to 1023/],
+  ["an unknown track", { trackId: "id-Lead", slotIndex: 0 }, /No track has the id ‘id-Lead’/]
 ];
 for (const [name, params, message] of launchRefusals) {
   test(`launch refuses ${name}`, () => {
@@ -246,3 +254,30 @@ test("a scene window that will not scroll fails the request", () => {
   assert.equal(response.ok, false);
   assert.match(response.payload.message, /did not scroll its scene window to slot 12/);
 });
+
+test("delete removes a launcher clip past the first eight scenes after checking its name", () => {
+  const { run, scenes } = setup({ scenes: 20, clips: { "1:13": "Bassline", "0:13": "Keys" } });
+  const response = run("delete", { what: "clip", trackId: "id-Bass", slotIndex: 13, clipName: "Bassline" });
+  assert.equal(response.ok, true, JSON.stringify(response.payload));
+  assert.deepEqual(plain(Object.keys(scenes[13].clips)), ["0"]);
+});
+
+test("delete fails when the clip stays in its slot", () => {
+  const response = setup({ clips: { "1:3": "Bassline" }, ignore: ["deleteClip"] }).run("delete", { what: "clip", trackId: "id-Bass", slotIndex: 3, clipName: "Bassline" });
+  assert.equal(response.ok, false);
+  assert.match(response.payload.message, /slot 3 still holds ‘Bassline’/);
+});
+
+const clipDeleteRefusals = [
+  ["a clip with another name", { slotIndex: 3, clipName: "Old" }, /clip in slot 3 on ‘Bass’ is now named ‘Bassline’, not ‘Old’\. Nothing was deleted/],
+  ["an empty slot", { slotIndex: 4, clipName: "Bassline" }, /Slot 4 on ‘Bass’ holds no clip/]
+];
+for (const [name, params, message] of clipDeleteRefusals) {
+  test(`delete refuses ${name}`, () => {
+    const { run, log } = setup({ clips: { "1:3": "Bassline" } });
+    const response = run("delete", { what: "clip", trackId: "id-Bass", ...params });
+    assert.equal(response.ok, false);
+    assert.match(response.payload.message, message);
+    assert.deepEqual(log, []);
+  });
+}
