@@ -1,8 +1,36 @@
-# Bitwig Agent Bridge
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.svg">
+    <img src="assets/banner-light.svg" alt="Bitwig Agent Bridge: let AI agents compose, arrange and mix in Bitwig Studio" width="100%">
+  </picture>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-FF8713" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/Bitwig_Studio-6.1.7-FF8713" alt="Bitwig Studio 6.1.7">
+  <img src="https://img.shields.io/badge/Controller_API-25-FF8713" alt="Controller API 25">
+  <img src="https://img.shields.io/badge/MCP-stdio-18181B" alt="MCP over stdio">
+  <img src="https://img.shields.io/badge/macOS-13%2B-18181B" alt="macOS 13 or newer">
+  <img src="https://img.shields.io/badge/Node.js-20%2B-18181B" alt="Node.js 20 or newer">
+</p>
+
+<p align="center">
+  <a href="#setup-with-claude-code">Setup</a> ·
+  <a href="#what-you-can-ask">Examples</a> ·
+  <a href="#tool-reference">Tools</a> ·
+  <a href="#limitations">Limitations</a> ·
+  <a href="HELP.md">Help</a>
+</p>
 
 Tell an agent what to change in Bitwig Studio. Bitwig Agent Bridge does it on your Mac, then checks that Bitwig actually did it.
 
 Bitwig Agent Bridge is a local [MCP](https://modelcontextprotocol.io) server for Bitwig Studio 6 on macOS. It gives an agent such as Claude Code exact, read-back-verified control of tracks, the mixer, devices and plug-in parameters, launcher clips and notes, scenes, the transport and Bitwig's own actions, so it can compose, arrange and mix.
+
+<p align="center">
+  <img src="assets/demo.png" alt="Claude Code asked to write a bassline; Bitwig Studio shows the new Bass track with Polymer and the verified four-bar clip" width="100%">
+</p>
+
+## Why
 
 - **Exact targets.** Tracks are addressed by Bitwig's track id, which survives renaming and moving. Devices, scenes and clips are addressed by index plus their exact current name, so a stale target is refused instead of changing the wrong thing.
 - **Read back.** A change is reported as done only once Bitwig shows it. Otherwise the reply says what Bitwig holds now.
@@ -42,6 +70,17 @@ Bitwig Agent Bridge is a local [MCP](https://modelcontextprotocol.io) server for
 5. **Work.** For example: "Create an instrument track called Bass, insert Polymer, write a four-bar bassline in C minor into slot 0 and launch it."
 
 Other agents (Claude Desktop, Codex, Cursor, VS Code and more), troubleshooting and uninstalling are covered in [HELP.md](HELP.md).
+
+## What you can ask
+
+- "Make an instrument track called Keys, put Polymer on it and write a four-bar chord progression in A minor into slot 0."
+- "Set the tempo to 124 BPM, turn the metronome on and start playback."
+- "Duplicate scene 2, name the copy Chorus and color it orange."
+- "Pull the bass down 3 dB, pan the hats 20 % right and send the snare to the reverb at −12 dB."
+- "List the remote controls on the first device of the Lead track and open the filter a bit."
+- "Delete the clip Sketch in slot 3 on the Drums track."
+
+The agent picks the tools; every change comes back with what Bitwig reports, so a refused or ignored change shows up in the reply.
 
 ## How it works
 
