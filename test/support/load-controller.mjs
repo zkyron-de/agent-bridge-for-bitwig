@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
-const SOURCE = readFileSync(new URL("../../controller/ControlDeck.control.js", import.meta.url), "utf8");
+const SOURCE = readFileSync(new URL("../../controller/BitwigAgentBridge.control.js", import.meta.url), "utf8");
 
 // Loads the controller script against a fake Bitwig host with a manual clock,
 // so request handling can be tested without Bitwig running. Tests replace the
@@ -14,6 +14,7 @@ export function loadController() {
     defineMidiPorts() {},
     addDeviceNameBasedDiscoveryPair() {},
     scheduleTask(callback, delay) { clock.tasks.push({ at: clock.now + delay, callback }); },
+    getHostApiVersion() { return 25; },
     println() {},
     errorln() {}
   };

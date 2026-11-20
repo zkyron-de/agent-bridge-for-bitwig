@@ -9,7 +9,7 @@ test("bridge defaults are local and non-privileged", () => {
   assert.ok(BRIDGE_PORT > 1024 && BRIDGE_PORT < 65536);
 });
 
-test("authenticated local packets round-trip Control Deck requests", async () => {
+test("authenticated local packets round-trip Bitwig Agent Bridge requests", async () => {
   const server = dgram.createSocket("udp4");
   await new Promise((resolve, reject) => {
     server.once("error", reject);

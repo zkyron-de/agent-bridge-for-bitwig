@@ -4,6 +4,47 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `bitwig_read_clip`, `bitwig_write_clip` and `bitwig_edit_clip` replace `bitwig_clip_notes` and `bitwig_create_note_clip`. They read and write clip name, color and loop, notes with velocity, duration, channel, mute and the per-note expressions timbre, pan and gain (in dB, as Bitwig's Inspector shows it), and work on any grid from 1 to 960 steps per beat, so off-grid timing is kept. `bitwig_edit_clip` adds, changes or deletes single notes and checks that every other note stays as it was. Tool inputs are strict: unknown fields are rejected.
+
+- `bitwig_set_track` replaces `bitwig_set_track_mix` and `bitwig_rename_track`. It sets name, color, volume and pan, mute, solo and arm, and send level, on/off and pre/post mode, on main tracks, effect tracks and the master track, and reads every value back. Volume and send levels are in dB and pan runs from −1 to 1, as Bitwig's mixer shows them.
+- `bitwig_tracks` also lists effect tracks and the master track, and gives each track its color, volume in dB, pan and sends.
+- `bitwig_browser_search`, `bitwig_set_device` and `bitwig_set_device_parameters`. The browser search filters by the browser's location column (devices, presets, a device's presets, plug-in folders), device type and category, at the end of a chain or before one device. `bitwig_set_device` sets enabled, plug-in window, expanded, remote controls shown and the page shown. `bitwig_set_device_parameters` sets up to 32 parameters per call by direct ID or remote control, checks every target before writing and reads every value back.
+- `bitwig_transport` reads and sets, in one call, playback (play, stop, continue, restart), arranger record, tempo, time signature, playhead position (also while playing), arranger loop, metronome and its volume, pre-roll, arranger and launcher overdub, arranger automation write and its mode, and the default launch quantization. Every change is read back; without fields it returns the full transport state.
+- Tracks are addressed by `trackId`, Bitwig's channel id, in every tool. It stays the same when a track is renamed or moved, so tracks may now share a name; `bitwig_tracks`, `bitwig_create_track`, the launcher and clip replies carry it. `bitwig_set_track` finds effect tracks and the master by id too.
+- `bitwig_delete` deletes a track (main or effect), a device, a scene or a launcher clip, checks it before and confirms it after.
+- `npm run check:api` checks every method the controller calls against the Controller API reference bundled with Bitwig Studio and fails on a name no API class has or one that is only deprecated.
+- A registry test checks that there are at most 25 tools, every input schema is strict, every tool calls a method the controller dispatches (and the other way round), and HELP.md documents exactly these tools.
+- `bitwig_actions` searches by category too, pages its results and marks blocked actions. `bitwig_invoke_action` also runs undo and redo (confirmed through Bitwig's undo state) and switches the panel layout (read back). Because Bitwig does not confirm actions, every call returns the project state it saw change. Actions that create, open or close a project, quit Bitwig or answer an open dialog are refused.
+- `bitwig_launcher`, `bitwig_edit_scene` and `bitwig_launch` replace `bitwig_clips` and `bitwig_launch_scene`. The launcher read covers every scene and main track at once, with scene names, colors and clip counts and each clip's play state. Scenes can be created, duplicated (with their clips), named and colored. Launches take Bitwig's quantization and launch modes, stop and return to the arrangement work per track or for all tracks, and every launch or stop is confirmed through the slots' play states.
+- `bitwig_insert_device` inserts devices, Bitwig presets and plug-ins by exact browser name, or by `bitwigId`, `clapId` or `vst3Id`, at the end of the chain or before one device, and confirms the new device's name or preset. `bitwig_insert_sample` loads a file by path. `bitwig_device_parameters` returns the remote controls of any page together with the direct parameters. Device listings report `expanded` and `remoteControlsVisible`.
+
+### Removed
+
+- `bitwig_set_track_mix` and `bitwig_rename_track` (see `bitwig_set_track`). The track list no longer carries `reference`, `volumeNormalized` or `panNormalized`.
+- `bitwig_clip_notes` and `bitwig_create_note_clip` (see Added). Per-note pressure is not offered because Bitwig does not keep a pressure written through the Controller API.
+- `bitwig_find_devices`, `bitwig_insert_stock_device`, `bitwig_insert_clap_device`, `bitwig_insert_sample_file`, `bitwig_remote_controls`, `bitwig_selected_device_remote_controls`, `bitwig_set_remote_control`, `bitwig_set_device_parameter` and `bitwig_open_device_window` (see Added). `bitwig_find_samples` and loading a sample by name: Bitwig 6 ignores switching its browser to the Samples tab through the API, so samples load by path only.
+- `bitwig_transport`'s `action` field (`status`, `play`, `stop`, `toggle`, `set_tempo`, `set_position`); see Added. Toggle is gone; read the state and pass `playback`.
+- `trackIndex`, `trackName` and `trackKind` from every tool, `duplicateNames` from `bitwig_tracks`, and the refusal of tracks that share a name (see Added).
+- `bitwig_delete_track` and `bitwig_delete_device` (see `bitwig_delete`).
+- `bitwig_clips` and `bitwig_launch_scene` (see Added). Launching a scene no longer forces immediate, from-start launching; pass `quantization: "none"` and `launchMode: "from_start"` for that.
+- `bitwig_nest_device` and `bitwig_save_device_preset` (Save to Library needs keyboard input the API cannot give).
+- The local plug-in inventory: `bitwig_plugins`, `bitwig_refresh_plugin_index`, `npm run index:plugins` and `src/plugin-index.mjs`. Bitwig's browser lists the installed plug-ins.
+- Direct parameter writes no longer compensate a plug-in that reports the value divided by 16384, and the MatrixBrute special case is gone; the reply names the problem instead.
+
+- The Next.js dashboard (`dashboard/`), its local status service (`src/dashboard-server.mjs`, `src/local-http.mjs`), the macOS WebKit wrapper (`macos/`), the CoreMIDI auto-detect helper (`native/`), the double-click installer, `PORTING.md`, and the launchd agents that started them. No MCP tool used any of them.
+- The controller script no longer declares MIDI ports or a discovery pair, so Bitwig no longer auto-adds it; add it once in Settings → Controllers.
+
+### Changed
+
+- The README now holds the Claude Code setup, the complete tool reference and a Limitations section with everything measured in Bitwig 6.1.7; HELP.md keeps the other agents, troubleshooting and uninstalling.
+- The bridge reaches the first 64 main tracks and 16 effect tracks (was 128 and 32), with 8 sends per track, and 32 devices per track (was 64).
+- Renamed the project to **Bitwig Agent Bridge**: package and MCP server name `bitwig-agent-bridge`, controller script `controller/BitwigAgentBridge.control.js` (vendor and name "Bitwig Agent Bridge", new extension UUID), install folder `Controller Scripts/Bitwig Agent Bridge/`, wire protocol `bitwig-agent-bridge/1`, environment variables `BITWIG_AGENT_BRIDGE_HOST`, `_PORT` and `_TOKEN`, and request log `logs/bitwig-agent-bridge.jsonl`. The UDP port stays 50701. An installed Control Deck script does not talk to the renamed server; remove it from Bitwig and add Bitwig Agent Bridge instead.
+- The controller uses the non-deprecated five-argument `defineController` with an author.
+- The controller now targets Controller API 25 (Bitwig Studio 6, tested with 6.1.7) instead of 18. `bitwig_status` reports the requested and the host API version. The deprecated `Device.isParameterPageSectionVisible` is no longer used, so the remote-controls replies drop `parameterListVisible`, and cue markers are positioned with `SettableBeatTimeValue.set`.
+- `npm run setup` now only installs dependencies, creates the bridge secret, and installs the controller script. `--skip-build` and `--skip-agents` are gone; `--skip-install` skips `npm install`.
+
 ## [1.2.1] - 2026-10-28
 
 Fixes security advisories in the dashboard and MCP server dependencies, lists the agents Control Deck works with in the docs and on the Connect page, and clears the dashboard lint errors.
