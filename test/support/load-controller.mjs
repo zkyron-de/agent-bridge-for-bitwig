@@ -14,6 +14,7 @@ export function loadController() {
     defineMidiPorts() {},
     addDeviceNameBasedDiscoveryPair() {},
     scheduleTask(callback, delay) { clock.tasks.push({ at: clock.now + delay, callback }); },
+    getHostApiVersion() { return 25; },
     println() {},
     errorln() {}
   };

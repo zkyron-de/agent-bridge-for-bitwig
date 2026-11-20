@@ -29,7 +29,7 @@ Bitwig Agent Bridge lets an SI agent operate Bitwig Studio the way a careful eng
 | Requirement | Minimum |
 |---|---|
 | macOS | 13 Ventura or newer (Apple silicon and Intel) |
-| Bitwig Studio | 6.x (Controller API 18) |
+| Bitwig Studio | 6.x with Controller API 25 (tested with 6.1.7) |
 | Node.js | 20 or newer |
 
 Only the controller-script install path in `scripts/setup.mjs` and the plug-in scanner's folder paths are macOS-specific.
@@ -204,7 +204,7 @@ Port (loopback-only): `50701/udp` bridge.
 
 **The controller refuses to start and mentions a missing token.** The repo copy of the controller was installed by hand instead of through setup, so the secret placeholder was never stamped. Run setup; never copy `controller/BitwigAgentBridge.control.js` into Bitwig manually.
 
-**A tool says several tracks "are all named" the same.** Bitwig's controller API version 18 gives tracks no permanent ID, so Bitwig Agent Bridge finds a track by its position and checks its name. When two tracks share a name, that check can't catch a track that moved, so tools refuse them. `bitwig_tracks` lists the clashing names under `duplicateNames`. Give each track a unique name, in Bitwig or with `bitwig_rename_track`, which still works on duplicates and refuses a name another track already has.
+**A tool says several tracks "are all named" the same.** The bridge does not use track IDs yet, so Bitwig Agent Bridge finds a track by its position and checks its name. When two tracks share a name, that check can't catch a track that moved, so tools refuse them. `bitwig_tracks` lists the clashing names under `duplicateNames`. Give each track a unique name, in Bitwig or with `bitwig_rename_track`, which still works on duplicates and refuses a name another track already has.
 
 **Save to Library opened, but nothing was saved.** Bitwig's API can open the dialog but can't type into it, so `bitwig_save_device_preset` leaves the dialog open for you to name and save. With `confirm: true` it presses Enter to accept the prefilled name, and only when the same device is still selected. Compare `presetNameBefore` and `presetNameAfter` in the reply, then check the Library.
 

@@ -1,4 +1,4 @@
-loadAPI(18);
+loadAPI(25);
 
 host.defineController("Bitwig Agent Bridge", "Bitwig Agent Bridge", "1.2.1", "8A319A60-5BAF-4C0D-B613-16D646B1E8A6", "_zkyron, based on Bitwig Control Deck by Remy Mazmanian");
 // No MIDI: all control data uses an authenticated local UDP channel that never
@@ -525,7 +525,6 @@ function remoteControlsSnapshot() {
    }
    return {
       remoteControlsVisible: cursorDevice.isRemoteControlsSectionVisible().get(),
-      parameterListVisible: cursorDevice.isParameterPageSectionVisible().get(),
       pageCount: cursorRemoteControlsPage.pageCount().get(),
       pageNames: pageNames,
       selectedPageIndex: selectedPageIndex,
@@ -1392,7 +1391,7 @@ function handleCueMarkers(request) {
             if (!inserted) throw new Error("Bitwig created a cue marker but the bridge could not identify it.");
 
             inserted.name().set(expected.name);
-            inserted.position().setRaw(expected.positionBeats);
+            inserted.position().set(expected.positionBeats);
             created++;
             later(240, processNext);
          } catch (error) {
@@ -1437,7 +1436,7 @@ function handleCueMarkers(request) {
          var existing = cueMarkerAtPosition(expected.positionBeats);
          if (existing) {
             existing.marker.name().set(expected.name);
-            existing.marker.position().setRaw(expected.positionBeats);
+            existing.marker.position().set(expected.positionBeats);
             updated++;
             later(160, processNext);
             return;
@@ -2394,7 +2393,8 @@ function dispatch(request) {
             connected: true,
             bridge: "Bitwig Agent Bridge",
             version: BRIDGE_VERSION,
-            apiVersion: 18,
+            apiVersion: 25,
+            hostApiVersion: host.getHostApiVersion(),
             project: application.projectName().get(),
             projectModified: project.isModified().get(),
             transport: readTransport(),
@@ -2582,11 +2582,10 @@ function dispatch(request) {
             later(action === "status" ? 1 : 120, function() {
                try {
                   if (action === "show") {
-                     // Keep the eight soft controls visible while collapsing
-                     // the plug-in's long generic parameter body.
+                     // Collapse the device body and show only the eight
+                     // remote controls.
                      device.isExpanded().set(false);
                      device.isRemoteControlsSectionVisible().set(true);
-                     device.isParameterPageSectionVisible().set(false);
                   } else if (action === "hide") {
                      device.isRemoteControlsSectionVisible().set(false);
                   }
@@ -2635,11 +2634,9 @@ function dispatch(request) {
                try {
                   if (selectedAction === "show") {
                      // A nested device must remain expanded for Bitwig to draw
-                     // its Remote Controls section. Hide only the long generic
-                     // parameter page so the compact eight controls stay visible.
+                     // its Remote Controls section.
                      cursorDevice.isExpanded().set(true);
                      cursorDevice.isRemoteControlsSectionVisible().set(true);
-                     cursorDevice.isParameterPageSectionVisible().set(false);
                   } else if (selectedAction === "hide") {
                      cursorDevice.isRemoteControlsSectionVisible().set(false);
                   }
@@ -2911,7 +2908,6 @@ function init() {
    interested(cursorDeviceSlot.name());
    interested(cursorDevice.isExpanded());
    interested(cursorDevice.isRemoteControlsSectionVisible());
-   interested(cursorDevice.isParameterPageSectionVisible());
    interested(cursorRemoteControlsPage.getName());
    interested(cursorRemoteControlsPage.pageNames());
    interested(cursorRemoteControlsPage.selectedPageIndex());

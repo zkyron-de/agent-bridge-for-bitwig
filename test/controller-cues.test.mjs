@@ -12,7 +12,7 @@ function setup({ playhead = 16, playing = false, markers = [], addWorks = true }
   const view = marker => ({
     exists: () => value(() => true),
     name: () => value(() => marker.name, next => { marker.name = next; }),
-    position: () => ({ ...value(() => marker.positionBeats), setRaw: next => { marker.positionBeats = next; } })
+    position: () => ({ ...value(() => marker.positionBeats), set: next => { marker.positionBeats = next; } })
   });
   context.transport = {
     getPosition: () => value(() => state.playhead),
