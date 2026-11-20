@@ -12,8 +12,8 @@ for (const tool of tools) tool.method = (await tool.handler({})).method;
 const controller = readFileSync(new URL("../controller/BitwigAgentBridge.control.js", import.meta.url), "utf8");
 const dispatchBody = controller.slice(controller.indexOf("function dispatch(request) {"));
 const dispatched = [...dispatchBody.slice(0, dispatchBody.indexOf("\n}\n")).matchAll(/case "([a-z_]+)":/g)].map(m => m[1]);
-const help = readFileSync(new URL("../HELP.md", import.meta.url), "utf8");
-const reference = help.slice(help.indexOf("## MCP tool reference"), help.indexOf("\n## ", help.indexOf("## MCP tool reference") + 5));
+const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+const reference = readme.slice(readme.indexOf("## Tool reference"), readme.indexOf("\n## ", readme.indexOf("## Tool reference") + 5));
 
 test("there are at most 25 tools, each with a unique bitwig_ name and a description", () => {
   assert.ok(tools.length <= 25, `${tools.length} tools`);
@@ -51,8 +51,8 @@ test("every tool calls a method the controller dispatches, and every dispatched 
   assert.deepEqual(dispatched.filter(method => !called.has(method)), [], "dispatched methods without a tool");
 });
 
-test("HELP.md documents exactly the registered tools and counts them right", () => {
+test("the README tool reference documents exactly the registered tools", () => {
   const documented = [...reference.matchAll(/^- \*\*(bitwig_[a-z_]+)\*\*/gm)].map(m => m[1]);
   assert.deepEqual([...documented].sort(), tools.map(t => t.name).sort());
-  assert.match(reference, new RegExp(`All ${tools.length} tools`));
+  assert.match(readme, new RegExp(`All ${tools.length} tools`));
 });

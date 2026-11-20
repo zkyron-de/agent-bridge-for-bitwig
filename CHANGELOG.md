@@ -38,6 +38,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- The README now holds the Claude Code setup, the complete tool reference and a Limitations section with everything measured in Bitwig 6.1.7; HELP.md keeps the other agents, troubleshooting and uninstalling.
 - The bridge reaches the first 64 main tracks and 16 effect tracks (was 128 and 32), with 8 sends per track, and 32 devices per track (was 64).
 - Renamed the project to **Bitwig Agent Bridge**: package and MCP server name `bitwig-agent-bridge`, controller script `controller/BitwigAgentBridge.control.js` (vendor and name "Bitwig Agent Bridge", new extension UUID), install folder `Controller Scripts/Bitwig Agent Bridge/`, wire protocol `bitwig-agent-bridge/1`, environment variables `BITWIG_AGENT_BRIDGE_HOST`, `_PORT` and `_TOKEN`, and request log `logs/bitwig-agent-bridge.jsonl`. The UDP port stays 50701. An installed Control Deck script does not talk to the renamed server; remove it from Bitwig and add Bitwig Agent Bridge instead.
 - The controller uses the non-deprecated five-argument `defineController` with an author.
