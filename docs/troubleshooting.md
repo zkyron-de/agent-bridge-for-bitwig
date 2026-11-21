@@ -2,7 +2,9 @@
 
 **Tools time out.** Bitwig isn't open, or the controller isn't active. In Bitwig: Settings → Controllers → confirm "Agent Bridge for Bitwig" exists and is enabled. `bitwig_status` is the cheapest way to check what the agent sees.
 
-**Requests time out even though Agent Bridge for Bitwig is enabled.** The controller script and the MCP server may disagree about the secret, usually because the controller was installed before the current `data/bridge-token`. The bridge ignores requests with the wrong secret without replying, shows a popup in Bitwig the first time, and logs the count. Run setup again (it re-stamps the controller), then reload the controller in Bitwig.
+**Requests time out even though Agent Bridge for Bitwig is enabled.** The controller script and the MCP server may disagree about the secret, usually because the controller was installed before the current secret was created, for example when a second setup ran with a different user data folder. The bridge ignores requests with the wrong secret without replying, shows a popup in Bitwig the first time, and logs the count. Run setup again (it re-stamps the controller), then reload the controller in Bitwig.
+
+**"No Agent Bridge for Bitwig secret found".** The MCP server finds no secret in the user data folder. Run setup once; when your agent runs the server as another user or with another home folder, set `AGENT_BRIDGE_FOR_BITWIG_TOKEN` to the secret instead.
 
 **The controller refuses to start and mentions a missing token.** The repo copy of the controller was installed by hand instead of through setup, so the secret placeholder was never stamped. Run setup; never copy `controller/AgentBridgeForBitwig.control.js` into Bitwig manually.
 

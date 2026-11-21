@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Local setup for Agent Bridge for Bitwig. Safe to re-run at any time.
 //
-//   npm run setup                       install deps, create the secret,
+//   npx agent-bridge-for-bitwig setup   from npm: create the secret and
 //                                       install the controller script
+//   npm run setup                       in a checkout: also install deps
 //   npm run setup -- --skip-install     skip `npm install` (dev loop)
 //   npm run setup -- --skip-controller  do not (re)install the controller
 //   npm run setup -- --controller-dir "<path>"
@@ -12,29 +13,37 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { LEGACY_TOKEN_FILE, tokenFile as userTokenFile } from "../src/paths.mjs";
 import { CONTROLLER_FILE_NAME, CONTROLLER_FOLDER_NAME, resolveControllerScripts, windowsDocumentsFolder } from "./bitwig-folder.mjs";
 
 const root = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 const argv = process.argv.slice(2);
 const args = new Set(argv);
 const isWindows = process.platform === "win32";
+// Installed from npm (npx or a global install) rather than run in a checkout.
+const fromPackage = root.split(path.sep).includes("node_modules");
+const { version } = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 
 function optionValue(name) {
   const index = argv.indexOf(name);
   if (index < 0) return "";
   const value = argv[index + 1];
   if (!value || value.startsWith("--")) {
-    console.log(`\n  ${name} needs a folder, for example: npm run setup -- ${name} "<path>"\n`);
+    console.log(`\n  ${name} needs a folder, for example: ${setupCommand()} ${name} "<path>"\n`);
     process.exit(1);
   }
   return path.resolve(value);
 }
 
-const tokenFile = path.join(root, "data", "bridge-token");
+function setupCommand() {
+  return fromPackage ? "npx agent-bridge-for-bitwig setup" : "npm run setup --";
+}
+
+const tokenFile = userTokenFile();
 const controllerSource = path.join(root, "controller", CONTROLLER_FILE_NAME);
 const explicitControllerScripts = optionValue("--controller-dir");
 
@@ -55,7 +64,7 @@ if (nodeMajor < 20) {
 ok(`Node.js ${process.versions.node}`);
 
 // ------------------------------------------------------------- dependencies
-if (!args.has("--skip-install")) {
+if (!fromPackage && !args.has("--skip-install")) {
   heading("Dependencies");
   // On Windows npm is a .cmd script, which Node only starts through a shell.
   const install = spawnSync("npm", ["install", "--no-fund", "--no-audit"], { cwd: root, encoding: "utf8", shell: isWindows });
@@ -68,12 +77,19 @@ if (!args.has("--skip-install")) {
 
 // ------------------------------------------------------------------- secret
 heading("Bridge secret");
-await mkdir(path.dirname(tokenFile), { recursive: true });
+await mkdir(path.dirname(tokenFile), { recursive: true, mode: 0o700 });
 if (existsSync(tokenFile)) {
-  ok("Using the existing bridge secret");
+  ok(`Using the existing bridge secret (${tokenFile})`);
+} else if (existsSync(LEGACY_TOKEN_FILE)) {
+  // Keep the secret a checkout from before 2.2.0 created, so a controller
+  // stamped with it keeps working, and move it out of the checkout.
+  await copyFile(LEGACY_TOKEN_FILE, tokenFile);
+  await chmod(tokenFile, 0o600);
+  await rm(LEGACY_TOKEN_FILE);
+  ok(`Moved the bridge secret from data/bridge-token to ${tokenFile}`);
 } else {
   await writeFile(tokenFile, `${randomUUID()}\n`, { mode: 0o600 });
-  ok("Generated a new bridge secret (data/bridge-token)");
+  ok(`Generated a new bridge secret (${tokenFile})`);
 }
 const token = (await readFile(tokenFile, "utf8")).trim();
 
@@ -118,13 +134,20 @@ if (failures > 0) {
   process.exit(1);
 }
 
+// npx pins the version, so the server always matches the controller script
+// this setup installed. On Windows npx is a .cmd script that needs cmd /c.
+const serverCommand = fromPackage
+  ? `${isWindows ? "cmd /c " : ""}npx -y agent-bridge-for-bitwig@${version}`
+  : `node "${path.join(root, "src", "index.mjs")}"`;
+const smokeCommand = fromPackage ? `npx -y agent-bridge-for-bitwig@${version} smoke` : "npm run smoke";
+
 heading("Setup complete. Next steps:");
 console.log(`
   1. In Bitwig: Settings → Controllers → + Add Controller → vendor and
      controller "Agent Bridge for Bitwig". (Already added? Toggle its power
      button off and on so Bitwig reloads the script.)
   2. Register the MCP server with your agent, for example Claude Code:
-     claude mcp add --scope user bitwig -- node "${path.join(root, "src", "index.mjs")}"
+     claude mcp add --scope user bitwig -- ${serverCommand}
   3. Optional: check the connection with Bitwig open:
-     npm run smoke
+     ${smokeCommand}
 `);

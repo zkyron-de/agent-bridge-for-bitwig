@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 import { appendFile, mkdir } from "node:fs/promises";
+import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { BitwigClient } from "./bitwig-client.mjs";
+import { logDirectory as userLogDirectory } from "./paths.mjs";
 import { registerTools } from "./tools.mjs";
 
 const client = new BitwigClient();
-const server = new McpServer({ name: "agent-bridge-for-bitwig", version: "2.1.0" });
-const logDirectory = new URL("../logs/", import.meta.url);
-const logFile = new URL("agent-bridge-for-bitwig.jsonl", logDirectory);
+const server = new McpServer({ name: "agent-bridge-for-bitwig", version: "2.2.0" });
+const logDirectory = userLogDirectory();
+const logFile = path.join(logDirectory, "agent-bridge-for-bitwig.jsonl");
 
 function output(data) {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], structuredContent: data };
@@ -22,7 +24,7 @@ function logValue(value) {
 
 async function writeLog(entry) {
   try {
-    await mkdir(logDirectory, { recursive: true });
+    await mkdir(logDirectory, { recursive: true, mode: 0o700 });
     await appendFile(logFile, JSON.stringify({ timestamp: new Date().toISOString(), ...entry }) + "\n", "utf8");
   } catch {
     // Logging must never break music control.

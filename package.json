@@ -1,25 +1,55 @@
 {
   "name": "agent-bridge-for-bitwig",
-  "version": "2.1.0",
-  "private": true,
+  "version": "2.2.0",
   "type": "module",
-  "description": "Agent Bridge for Bitwig: an MCP bridge for exact, read-back-verified Bitwig Studio control",
+  "description": "MCP server for Bitwig Studio 6: AI agents create tracks, write MIDI clips, set devices and mix, and every change is read back from Bitwig",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "bitwig",
+    "bitwig-studio",
+    "daw",
+    "midi",
+    "claude",
+    "claude-code",
+    "ai-agent",
+    "controller-script",
+    "music-production"
+  ],
   "author": "_zkyron",
   "contributors": [
     "Remy Mazmanian (Bitwig Control Deck, the project this is based on)"
   ],
   "license": "MIT",
+  "homepage": "https://github.com/zkyron-de/agent-bridge-for-bitwig#readme",
+  "bugs": {
+    "url": "https://github.com/zkyron-de/agent-bridge-for-bitwig/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/zkyron-de/agent-bridge-for-bitwig.git"
   },
+  "mcpName": "io.github.zkyron-de/agent-bridge-for-bitwig",
+  "bin": {
+    "agent-bridge-for-bitwig": "bin/agent-bridge-for-bitwig.mjs"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "controller/",
+    "scripts/setup.mjs",
+    "scripts/smoke.mjs",
+    "scripts/bitwig-folder.mjs",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "start": "node src/index.mjs",
     "setup": "node scripts/setup.mjs",
     "smoke": "node scripts/smoke.mjs",
     "check:api": "node scripts/check-api.mjs",
     "docs": "node scripts/tool-docs.mjs",
-    "check": "node --check src/index.mjs && node --check src/tools.mjs && node --check src/bitwig-client.mjs && node --check scripts/setup.mjs && node --check scripts/bitwig-folder.mjs && node --check scripts/smoke.mjs && node --check scripts/check-api.mjs && node --check scripts/tool-docs.mjs && node --check controller/AgentBridgeForBitwig.control.js",
+    "check": "node --check src/index.mjs && node --check src/tools.mjs && node --check src/bitwig-client.mjs && node --check src/paths.mjs && node --check bin/agent-bridge-for-bitwig.mjs && node --check scripts/setup.mjs && node --check scripts/bitwig-folder.mjs && node --check scripts/smoke.mjs && node --check scripts/check-api.mjs && node --check scripts/tool-docs.mjs && node --check controller/AgentBridgeForBitwig.control.js",
     "test": "node --test"
   },
   "dependencies": {

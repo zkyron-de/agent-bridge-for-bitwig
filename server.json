@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.zkyron-de/agent-bridge-for-bitwig",
+  "title": "Agent Bridge for Bitwig",
+  "description": "Control Bitwig Studio 6: tracks, MIDI clips, devices, mixer and scenes, each change read back.",
+  "repository": {
+    "url": "https://github.com/zkyron-de/agent-bridge-for-bitwig",
+    "source": "github"
+  },
+  "version": "2.2.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "agent-bridge-for-bitwig",
+      "version": "2.2.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

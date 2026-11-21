@@ -57,8 +57,8 @@ export function resolveControllerScripts({ platform, home, documents = "", expli
       "Could not find Bitwig's user folder. Looked in:",
       ...candidates.map(candidate => `      ${candidate}`),
       "    Start Bitwig Studio once so it creates the folder, then run setup again.",
-      "    If Bitwig keeps its files somewhere else, pass the folder that holds",
-      "    Bitwig's controller scripts: npm run setup -- --controller-dir \"<path>\""
+      "    If Bitwig keeps its files somewhere else, run setup again with",
+      "    --controller-dir \"<path>\" and the folder that holds Bitwig's controller scripts."
     ].join("\n")
   };
 }
