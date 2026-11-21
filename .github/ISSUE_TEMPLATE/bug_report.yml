@@ -8,7 +8,7 @@ body:
       value: |
         Thanks for reporting. Agent Bridge for Bitwig is a hobby project, maintained on a best-effort basis.
         Please check the [Limitations](https://github.com/zkyron-de/agent-bridge-for-bitwig/blob/main/docs/limitations.md) and [Troubleshooting](https://github.com/zkyron-de/agent-bridge-for-bitwig/blob/main/docs/troubleshooting.md) first: much of Bitwig's behavior there is known and measured.
-        Do not paste your `data/bridge-token` or other secrets.
+        Do not paste your `bridge-token` or other secrets.
   - type: input
     id: bitwig
     attributes:

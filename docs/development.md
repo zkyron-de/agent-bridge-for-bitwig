@@ -37,7 +37,7 @@ Controller API calls are checked against the reference bundled with Bitwig Studi
 
 | Variable | Used by | Effect |
 |---|---|---|
-| `AGENT_BRIDGE_FOR_BITWIG_TOKEN` | MCP server | Use this secret instead of `data/bridge-token`. It must match the one stamped into the controller. |
+| `AGENT_BRIDGE_FOR_BITWIG_TOKEN` | MCP server | Use this secret instead of the `bridge-token` file in the user data folder. It must match the one stamped into the controller. |
 | `AGENT_BRIDGE_FOR_BITWIG_HOST`, `AGENT_BRIDGE_FOR_BITWIG_PORT` | MCP server | Where the server sends requests (default `127.0.0.1`, `50701`). The controller always listens on `127.0.0.1:50701`, so these are only useful for tests. |
 | `BITWIG_API_DOCS` | `npm run check:api` | Location of Bitwig's Controller API reference |
 | `BITWIG_CONTROLLER` | `npm run check:api` | Check another controller file |
@@ -50,10 +50,13 @@ Controller API calls are checked against the reference bundled with Bitwig Studi
 | `src/index.mjs` | MCP server over stdio, request log |
 | `src/tools.mjs` | Tool names, descriptions and strict input schemas |
 | `src/bitwig-client.mjs` | UDP client that talks to the controller |
+| `src/paths.mjs` | The user data folder: secret and request log |
+| `bin/agent-bridge-for-bitwig.mjs` | The npm package's command: server, `setup`, `smoke` |
+| `server.json` | Entry for the official MCP Registry |
 | `scripts/setup.mjs` | Install: dependencies, secret, controller script |
 | `scripts/bitwig-folder.mjs` | Finds Bitwig's controller-script folder on macOS, Windows and Linux |
 | `scripts/smoke.mjs` | End-to-end check against a running Bitwig (`npm run smoke`) |
 | `scripts/check-api.mjs` | API name check against Bitwig's reference |
 | `scripts/tool-docs.mjs` | Generates the Inputs tables in `docs/tools.md` from the schemas |
-| `test/` | Unit tests with fake Bitwig objects, and the registry test |
+| `test/` | Unit tests with fake Bitwig objects, the registry test, and a package test that checks every file names the same version |
 | `docs/` | Setup, tool reference, limitations, troubleshooting, this page |

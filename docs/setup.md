@@ -14,13 +14,15 @@ The [README](../README.md#quick-start) has the short version for Claude Code. Th
 
 ## Install
 
-In the checkout, run:
+Start Bitwig once first (see below), then run:
 
 ```sh
-npm run setup
+npx agent-bridge-for-bitwig@2.2.0 setup
 ```
 
-It installs the MCP server's dependencies, creates a per-install secret at `data/bridge-token` (never committed) and installs the controller script, with the secret stamped in, into Bitwig's controller-script folder. It is safe to re-run at any time, for example after pulling changes or moving the checkout. It also removes a copy installed under the project's old name, Bitwig Agent Bridge.
+It creates a per-install secret in your [user data folder](#files-and-locations) and installs the controller script, with the secret stamped in, into Bitwig's controller-script folder. At the end it prints the exact commands for the next steps. It is safe to re-run at any time. It also removes a copy installed under the project's old name, Bitwig Agent Bridge.
+
+**From a checkout** instead, for development or to run unreleased changes: clone the repository and run `npm run setup` in it. It also installs the dependencies, and moves a secret from an older checkout (`data/bridge-token`) to the user data folder, so an installed controller keeps working. Wherever this page says `npx agent-bridge-for-bitwig@2.2.0 <command>`, a checkout uses `npm run <command>`, with `--` before any flags (`npm run setup -- --controller-dir "<path>"`).
 
 Setup looks for Bitwig's user folder, which Bitwig creates on its first start, so start Bitwig once before running setup:
 
@@ -35,7 +37,7 @@ The script goes into `Controller Scripts/Agent Bridge for Bitwig/` inside it.
 Flags:
 
 - `--controller-dir "<path>"` installs into this controller-script folder instead, for example if you moved Bitwig's "My Controller Scripts" location. The folder must exist.
-- `--skip-install` skips `npm install`.
+- `--skip-install` skips `npm install` (checkout only).
 - `--skip-controller` does not install the controller script.
 
 ## Set up Bitwig
@@ -49,62 +51,66 @@ Setup installs the controller script into Bitwig's controller-script folder (on 
 
 **Reloading.** After re-running setup (which re-stamps the secret into the controller script), Bitwig usually reloads the script by itself. If it does not, toggle the controller's power button off and on in Settings → Controllers, or restart Bitwig.
 
-**If the controller isn't listed at all**, Bitwig is probably looking in a non-default location: Settings → **Locations** → "My Controller Scripts" should point at the `Controller Scripts` folder setup printed. If you've customized it, run `npm run setup -- --controller-dir "<that folder>"`. Don't copy the repo file there by hand: it has no secret stamped in.
+**If the controller isn't listed at all**, Bitwig is probably looking in a non-default location: Settings → **Locations** → "My Controller Scripts" should point at the `Controller Scripts` folder setup printed. If you've customized it, run setup again with `--controller-dir "<that folder>"`. Don't copy the controller file there by hand: it has no secret stamped in.
 
 ## Check the connection
 
 With Bitwig open and the controller added, run:
 
 ```sh
-npm run smoke
+npx agent-bridge-for-bitwig@2.2.0 smoke
 ```
 
-It starts the MCP server like an agent would, calls a few read-only tools and prints one line per step. `npm run smoke -- --write` also creates a track named "Smoke test", writes a short clip, reads it back and deletes the track again; use an empty project for it.
+It starts the MCP server like an agent would, calls a few read-only tools and prints one line per step. With `--write` it also creates a track named "Smoke test", writes a short clip, reads it back and deletes the track again; use an empty project for it.
 
 ## Connect your agent
 
-- **Command:** `node <install-path>/src/index.mjs`
+- **Command:** `npx -y agent-bridge-for-bitwig@2.2.0` (from a checkout: `node <checkout>/src/index.mjs`)
 - **Transport:** stdio — no URL, no port, no network setup
 - Bitwig must be open for tools to work; the agent config is one-time.
 
+Use the version setup installed: setup prints it. Server and controller script then always come from the same release. From a checkout, replace `npx -y agent-bridge-for-bitwig@2.2.0` below with `node /path/to/agent-bridge-for-bitwig/src/index.mjs` (in JSON: `"command": "node"`, `"args": ["/path/to/agent-bridge-for-bitwig/src/index.mjs"]`).
+
+**Windows:** `npx` is a batch script there, which agents can only start through `cmd`. Put `cmd /c` in front of the command (`cmd /c npx -y agent-bridge-for-bitwig@2.2.0`), and in JSON use `"command": "cmd"` with `"args": ["/c", "npx", "-y", "agent-bridge-for-bitwig@2.2.0"]`.
+
 ### Agent configuration
 
-Replace `/path/to/agent-bridge-for-bitwig` with your install folder. The server name `bitwig` is up to you.
+The server name `bitwig` is up to you.
 
 **Claude Code** — adds it for every project:
 
 ```sh
-claude mcp add --scope user bitwig -- node /path/to/agent-bridge-for-bitwig/src/index.mjs
+claude mcp add --scope user bitwig -- npx -y agent-bridge-for-bitwig@2.2.0
 ```
 
 **OpenAI Codex** — the CLI, IDE extension and desktop app share this setting:
 
 ```sh
-codex mcp add bitwig -- node /path/to/agent-bridge-for-bitwig/src/index.mjs
+codex mcp add bitwig -- npx -y agent-bridge-for-bitwig@2.2.0
 ```
 
 Or add it to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.bitwig]
-command = "node"
-args = ["/path/to/agent-bridge-for-bitwig/src/index.mjs"]
+command = "npx"
+args = ["-y", "agent-bridge-for-bitwig@2.2.0"]
 ```
 
 **Grok CLI** — saves it to `~/.grok/config.toml`:
 
 ```sh
-grok mcp add bitwig -- node /path/to/agent-bridge-for-bitwig/src/index.mjs
+grok mcp add bitwig -- npx -y agent-bridge-for-bitwig@2.2.0
 ```
 
-**GitHub Copilot in VS Code** — run **MCP: Add Server** from the Command Palette, choose **Command (stdio)**, enter `node /path/to/agent-bridge-for-bitwig/src/index.mjs`, name it `bitwig`, then pick **Global** → **Copilot Global**. That writes `~/.copilot/mcp-config.json`, which you can also edit directly:
+**GitHub Copilot in VS Code** — run **MCP: Add Server** from the Command Palette, choose **Command (stdio)**, enter `npx -y agent-bridge-for-bitwig@2.2.0`, name it `bitwig`, then pick **Global** → **Copilot Global**. That writes `~/.copilot/mcp-config.json`, which you can also edit directly:
 
 ```json
 {
   "mcpServers": {
     "bitwig": {
-      "command": "node",
-      "args": ["/path/to/agent-bridge-for-bitwig/src/index.mjs"]
+      "command": "npx",
+      "args": ["-y", "agent-bridge-for-bitwig@2.2.0"]
     }
   }
 }
@@ -116,8 +122,8 @@ grok mcp add bitwig -- node /path/to/agent-bridge-for-bitwig/src/index.mjs
 {
   "mcpServers": {
     "bitwig": {
-      "command": "node",
-      "args": ["/path/to/agent-bridge-for-bitwig/src/index.mjs"]
+      "command": "npx",
+      "args": ["-y", "agent-bridge-for-bitwig@2.2.0"]
     }
   }
 }
@@ -128,17 +134,29 @@ Merge it into the file each one reads, then restart it or refresh its MCP list:
 - **Claude Desktop:** Settings → Developer → Edit Config opens `~/Library/Application Support/Claude/claude_desktop_config.json`.
 - **Cursor:** `~/.cursor/mcp.json`, or `.cursor/mcp.json` in a project.
 - **Windsurf:** in the Cascade panel, open the `...` menu and choose **Open MCP config file** to edit `mcp_config.json`.
-- **Cline:** click the MCP Servers icon in the Cline panel, open **Configure**, then **Configure MCP Servers**. The Cline CLI can add it in one line: `cline mcp add bitwig --yes -- node /path/to/agent-bridge-for-bitwig/src/index.mjs`.
+- **Cline:** click the MCP Servers icon in the Cline panel, open **Configure**, then **Configure MCP Servers**. The Cline CLI can add it in one line: `cline mcp add bitwig --yes -- npx -y agent-bridge-for-bitwig@2.2.0`.
 
 With Claude Code, check the connection with `claude mcp list` (or `/mcp` inside a session), then ask something like "Call bitwig_status and list the tracks". The tools appear as `mcp__bitwig__bitwig_status` and so on; allow them once, or add `mcp__bitwig` to the allowed tools with `/permissions`.
+
+## Update
+
+Run setup with the new version, for example `npx agent-bridge-for-bitwig@latest setup`. It keeps the secret and installs the new controller script; reload it in Bitwig if it doesn't reload by itself. Then point your agent at the version setup printed, for Claude Code:
+
+```sh
+claude mcp remove bitwig
+claude mcp add --scope user bitwig -- npx -y agent-bridge-for-bitwig@<new version>
+```
+
+From a checkout: pull, then run `npm run setup` again.
 
 ## Files and locations
 
 | What | Where |
 |---|---|
-| Per-install secret | `<install>/data/bridge-token` |
-| MCP request log | `<install>/logs/agent-bridge-for-bitwig.jsonl` |
-| Controller script (installed copy) | `~/Documents/Bitwig Studio/Controller Scripts/Agent Bridge for Bitwig/` |
+| User data folder | macOS `~/Library/Application Support/agent-bridge-for-bitwig/`, Windows `%APPDATA%\agent-bridge-for-bitwig\`, Linux `~/.config/agent-bridge-for-bitwig/` (or under `$XDG_CONFIG_HOME`) |
+| Per-install secret | `bridge-token` in the user data folder, readable only by you |
+| MCP request log | `logs/agent-bridge-for-bitwig.jsonl` in the user data folder |
+| Controller script (installed copy) | `Controller Scripts/Agent Bridge for Bitwig/` in Bitwig's user folder (see [Install](#install)) |
 
 Port (loopback-only): `50701/udp` bridge.
 
@@ -148,4 +166,4 @@ Port (loopback-only): `50701/udp` bridge.
 rm -rf ~/Documents/"Bitwig Studio"/"Controller Scripts"/"Agent Bridge for Bitwig"
 ```
 
-Then remove the controller in Bitwig's Settings → Controllers, delete the install folder, and remove the server from your agent (for Claude Code: `claude mcp remove bitwig`). Agent Bridge for Bitwig writes nowhere else.
+That is the macOS path; on Windows and Linux delete the same folder in Bitwig's user folder. Then remove the controller in Bitwig's Settings → Controllers, delete the user data folder (see above) and, if you used one, the checkout, and remove the server from your agent (for Claude Code: `claude mcp remove bitwig`). npx keeps a cached copy of the package, which `npm cache clean --force` removes. Agent Bridge for Bitwig writes nowhere else.

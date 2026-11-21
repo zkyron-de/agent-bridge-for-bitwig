@@ -13,7 +13,7 @@ You'll get an answer as soon as I can manage, and credit in the changelog if you
 ## What the bridge protects
 
 - **Local only.** The controller script listens on `127.0.0.1:50701` and the MCP server talks to it over loopback. Nothing listens on, or connects to, any network.
-- **Per-install secret.** Every request carries a secret that `npm run setup` generates on your machine (`data/bridge-token`, never committed). The controller ignores requests with a wrong or missing secret and does not even reply to them. Without a secret stamped in, it refuses to start.
+- **Per-install secret.** Every request carries a secret that setup generates on your machine (`bridge-token` in your user data folder, readable only by you; see [Files and locations](docs/setup.md#files-and-locations)). The controller ignores requests with a wrong or missing secret and does not even reply to them. Without a secret stamped in, it refuses to start.
 - **Exact targets.** Changes need exact targets and are refused on a mismatch, so a confused agent fails instead of editing the wrong thing.
 
 The bridge does not protect against software that already runs as your user: it can read the secret like any of your files. And whatever you allow your agent to do in Bitwig, the bridge carries out. Review what the agent proposes before you approve it.
