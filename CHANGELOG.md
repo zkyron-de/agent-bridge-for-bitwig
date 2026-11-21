@@ -4,6 +4,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.2.0] - unreleased
+
+### Added
+
+- An npm package with a command `agent-bridge-for-bitwig`: `npx agent-bridge-for-bitwig setup` installs the controller script without a checkout, agents start the server with `npx -y agent-bridge-for-bitwig@<version>`, and `smoke` checks the connection. Setup prints the commands for the installed version.
+- `server.json` for the official MCP Registry, as `io.github.zkyron-de/agent-bridge-for-bitwig`.
+
+### Changed
+
+- The bridge secret and the request log moved out of the install folder into the user's data folder: `~/Library/Application Support/agent-bridge-for-bitwig/` on macOS, `%APPDATA%\agent-bridge-for-bitwig\` on Windows, `~/.config/agent-bridge-for-bitwig/` on Linux. Setup moves an existing `data/bridge-token` there, so an installed controller keeps working; until then the server still reads the old file.
+- In a package install, setup skips `npm install`.
+
 ## [2.1.0] - 2026-11-20
 
 ### Added
@@ -186,7 +198,8 @@ First release of Bitwig Control Deck, a local MCP bridge that lets an AI agent c
 - Local dashboard at `http://127.0.0.1:50703` showing bridge health, the current session, loaded devices and a searchable inventory of installed VST3, VST2, Audio Unit and CLAP plug-ins. Its Connect page has copy-paste setup guides for Claude Code, Codex, Cursor, VS Code, Gemini CLI, local LLM setups and other MCP clients.
 - Local operation: the status service and dashboard listen on this Mac only, and every request to the Bitwig bridge must carry a secret generated for your install.
 
-[Unreleased]: https://github.com/zkyron-de/agent-bridge-for-bitwig/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/zkyron-de/agent-bridge-for-bitwig/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/zkyron-de/agent-bridge-for-bitwig/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/zkyron-de/agent-bridge-for-bitwig/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/zkyron-de/agent-bridge-for-bitwig/releases/tag/v2.0.0
 [1.2.1]: https://github.com/remymazmanian/bitwig-control-deck/compare/v1.2.0...v1.2.1

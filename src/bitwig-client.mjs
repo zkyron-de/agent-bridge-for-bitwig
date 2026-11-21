@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import dgram from "node:dgram";
 import { readFileSync } from "node:fs";
+import { LEGACY_TOKEN_FILE, tokenFile } from "./paths.mjs";
 
 export const BRIDGE_HOST = process.env.AGENT_BRIDGE_FOR_BITWIG_HOST || "127.0.0.1";
 export const BRIDGE_PORT = Number(process.env.AGENT_BRIDGE_FOR_BITWIG_PORT || 50701);
 export const BRIDGE_PROTOCOL = "agent-bridge-for-bitwig/1";
-export const TOKEN_FILE = new URL("../data/bridge-token", import.meta.url);
 // macOS caps a UDP datagram at the socket's send buffer, which defaults to
 // 9216 bytes (net.inet.udp.maxdgram). Raising it lets large note clips through.
 export const SEND_BUFFER_BYTES = 65536;
@@ -13,17 +13,24 @@ export const SEND_BUFFER_BYTES = 65536;
 export const MAX_PACKET_BYTES = 60000;
 
 // The per-install secret shared with the Bitwig controller script. Created by
-// `npm run setup`; never committed.
-export function readBridgeToken() {
-  if (process.env.AGENT_BRIDGE_FOR_BITWIG_TOKEN) return process.env.AGENT_BRIDGE_FOR_BITWIG_TOKEN;
-  try {
-    const token = readFileSync(TOKEN_FILE, "utf8").trim();
-    if (token) return token;
-  } catch {
-    // Fall through to the shared error below.
+// setup in the user's data folder; checkouts from before 2.2.0 kept it in
+// data/bridge-token, which is still read.
+export function readBridgeToken({
+  env = process.env,
+  files = [tokenFile(), LEGACY_TOKEN_FILE],
+  read = file => readFileSync(file, "utf8")
+} = {}) {
+  if (env.AGENT_BRIDGE_FOR_BITWIG_TOKEN) return env.AGENT_BRIDGE_FOR_BITWIG_TOKEN;
+  for (const file of files) {
+    try {
+      const token = read(file).trim();
+      if (token) return token;
+    } catch {
+      // Try the next location.
+    }
   }
   throw new Error(
-    "No Agent Bridge for Bitwig token found. Run `npm run setup` once to generate data/bridge-token and install the controller script, or set AGENT_BRIDGE_FOR_BITWIG_TOKEN."
+    `No Agent Bridge for Bitwig secret found at ${files[0]}. Run setup once (\`npx agent-bridge-for-bitwig setup\`, or \`npm run setup\` in a checkout) to create it and install the controller script, or set AGENT_BRIDGE_FOR_BITWIG_TOKEN.`
   );
 }
 
@@ -77,7 +84,7 @@ export class BitwigClient {
     const response = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Bitwig did not answer ${method} within ${timeoutMs} ms. Make sure Agent Bridge for Bitwig is enabled in Bitwig. If it is, run "npm run setup" so the bridge and this client share the same auth token.`));
+        reject(new Error(`Bitwig did not answer ${method} within ${timeoutMs} ms. Make sure Agent Bridge for Bitwig is enabled in Bitwig. If it is, run setup again so the bridge and this client share the same auth token.`));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
     });

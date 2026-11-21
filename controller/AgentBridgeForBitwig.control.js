@@ -1,15 +1,15 @@
 loadAPI(25);
 
-host.defineController("Agent Bridge for Bitwig", "Agent Bridge for Bitwig", "2.1.0", "8A319A60-5BAF-4C0D-B613-16D646B1E8A6", "_zkyron, based on Bitwig Control Deck by Remy Mazmanian");
+host.defineController("Agent Bridge for Bitwig", "Agent Bridge for Bitwig", "2.2.0", "8A319A60-5BAF-4C0D-B613-16D646B1E8A6", "_zkyron, based on Bitwig Control Deck by Remy Mazmanian");
 // No MIDI: all control data uses an authenticated local UDP channel that never
 // leaves this Mac. Without MIDI ports there is nothing for Bitwig to auto-detect,
 // so the controller is added once by hand in Settings → Controllers.
 host.defineMidiPorts(0, 0);
 
-var BRIDGE_VERSION = "2.1.0";
+var BRIDGE_VERSION = "2.2.0";
 var BRIDGE_PROTOCOL = "agent-bridge-for-bitwig/1";
 var BRIDGE_PORT = 50701;
-// Stamped with a per-install secret by `npm run setup`. The bridge refuses to
+// Stamped with a per-install secret by setup. The bridge refuses to
 // start while the placeholder is still in place.
 var BRIDGE_TOKEN = "__BRIDGE_TOKEN__";
 // Bank sizes, fixed at init as the Controller API requires.
@@ -678,7 +678,7 @@ function isAuthorized(request) {
 function noteAuthFailure() {
    authFailureCount += 1;
    if (authFailureCount === 1) {
-      host.showPopupNotification("Agent Bridge for Bitwig ignored a request with the wrong auth token. Run `npm run setup` to reinstall the controller script.");
+      host.showPopupNotification("Agent Bridge for Bitwig ignored a request with the wrong auth token. Run setup again to reinstall the controller script.");
    }
    if (authFailureCount === 1 || authFailureCount % 100 === 0) {
       host.errorln("Agent Bridge for Bitwig ignored " + authFailureCount + " request(s) with the wrong auth token.");
@@ -4236,8 +4236,8 @@ function init() {
    for (var r = 0; r < BROWSER_PAGE; r++) markBrowserItem(resultBank.getItemAt(r));
 
    if (BRIDGE_TOKEN === "__BRIDGE" + "_TOKEN__") {
-      host.showPopupNotification("Agent Bridge for Bitwig has no auth token. Run `npm run setup` and reinstall the controller script.");
-      host.errorln("Agent Bridge for Bitwig refused to start: the auth token placeholder was never stamped. Run `npm run setup` in the project folder.");
+      host.showPopupNotification("Agent Bridge for Bitwig has no auth token. Run setup and reinstall the controller script.");
+      host.errorln("Agent Bridge for Bitwig refused to start: the auth token placeholder was never stamped. Run setup (npx agent-bridge-for-bitwig setup, or npm run setup in a checkout).");
       return;
    }
 
