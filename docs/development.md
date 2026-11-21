@@ -54,6 +54,7 @@ Controller API calls are checked against the reference bundled with Bitwig Studi
 | `src/paths.mjs` | The user data folder: secret and request log |
 | `bin/agent-bridge-for-bitwig.mjs` | The npm package's command: server, `setup`, `smoke` |
 | `server.json` | Entry for the official MCP Registry |
+| `glama.json` | Lists the GitHub accounts that maintain the [Glama](https://glama.ai/mcp/servers/zkyron-de/agent-bridge-for-bitwig) listing |
 | `scripts/setup.mjs` | Install: dependencies, secret, controller script |
 | `scripts/bitwig-folder.mjs` | Finds Bitwig's controller-script folder on macOS, Windows and Linux |
 | `scripts/smoke.mjs` | End-to-end check against a running Bitwig (`npm run smoke`) |
