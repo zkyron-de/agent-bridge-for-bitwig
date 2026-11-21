@@ -24,7 +24,7 @@ function logValue(value) {
 
 async function writeLog(entry) {
   try {
-    await mkdir(logDirectory, { recursive: true });
+    await mkdir(logDirectory, { recursive: true, mode: 0o700 });
     await appendFile(logFile, JSON.stringify({ timestamp: new Date().toISOString(), ...entry }) + "\n", "utf8");
   } catch {
     // Logging must never break music control.
