@@ -2,7 +2,7 @@
 
 ## How it works
 
-- A Bitwig controller extension (`controller/AgentBridgeForBitwig.control.js`, Controller API 25) runs inside Bitwig and listens on `127.0.0.1` UDP port `50701` for authenticated requests. It is the only part that touches your project.
+- A Bitwig controller extension (`controller/AgentBridgeForBitwig.control.js`, Controller API 25) runs inside Bitwig and listens on UDP port `50701` for authenticated requests, which the MCP server sends to `127.0.0.1`. It is the only part that touches your project.
 - The MCP server (`src/index.mjs`, tools in `src/tools.mjs`) is started by your agent over stdio and relays tool calls to the extension.
 - Every request carries the per-install secret. Requests with the wrong secret get no answer.
 
@@ -15,7 +15,8 @@ agent ──stdio──▶ MCP server (src/index.mjs, src/tools.mjs)
 
 ## Security model
 
-- Everything binds to `127.0.0.1`. Nothing listens on, or connects to, any network.
+- The MCP server binds its reply socket to `127.0.0.1` and sends only there; the controller replies only to `127.0.0.1`. Nothing connects to any network.
+- The controller's port is opened by Bitwig, and the Controller API cannot choose the address (`addDatagramPacketObserver` takes only a port): Bitwig opens UDP `50701` on all network interfaces, as `lsof -nP -iUDP:50701` shows. A request from another machine needs the secret, which never leaves yours; without it the controller drops the request unanswered. To keep the port off the network entirely, block incoming UDP `50701` (or incoming connections to Bitwig) in your firewall.
 - Every bridge request carries a per-install secret generated on your machine and never committed anywhere. The controller refuses to run without one.
 - Mutations require exact targets (track ids; index plus current name for devices, scenes and clips) and are refused on mismatch or ambiguity, so a confused agent fails loudly instead of editing the wrong thing.
 - The MCP server logs requests locally to `logs/agent-bridge-for-bitwig.jsonl` so you can audit what an agent did.
@@ -38,7 +39,7 @@ Controller API calls are checked against the reference bundled with Bitwig Studi
 | Variable | Used by | Effect |
 |---|---|---|
 | `AGENT_BRIDGE_FOR_BITWIG_TOKEN` | MCP server | Use this secret instead of the `bridge-token` file in the user data folder. It must match the one stamped into the controller. |
-| `AGENT_BRIDGE_FOR_BITWIG_HOST`, `AGENT_BRIDGE_FOR_BITWIG_PORT` | MCP server | Where the server sends requests (default `127.0.0.1`, `50701`). The controller always listens on `127.0.0.1:50701`, so these are only useful for tests. |
+| `AGENT_BRIDGE_FOR_BITWIG_HOST`, `AGENT_BRIDGE_FOR_BITWIG_PORT` | MCP server | Where the server sends requests (default `127.0.0.1`, `50701`). The controller always listens on port `50701` and replies to `127.0.0.1`, so these are only useful for tests. |
 | `BITWIG_API_DOCS` | `npm run check:api` | Location of Bitwig's Controller API reference |
 | `BITWIG_CONTROLLER` | `npm run check:api` | Check another controller file |
 

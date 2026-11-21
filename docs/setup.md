@@ -158,7 +158,7 @@ From a checkout: pull, then run `npm run setup` again.
 | MCP request log | `logs/agent-bridge-for-bitwig.jsonl` in the user data folder |
 | Controller script (installed copy) | `Controller Scripts/Agent Bridge for Bitwig/` in Bitwig's user folder (see [Install](#install)) |
 
-Port (loopback-only): `50701/udp` bridge.
+Port: `50701/udp`. Bitwig opens it on all network interfaces; the Controller API cannot limit it to loopback. Requests without the secret are dropped unanswered, and replies go only to `127.0.0.1`. To keep the port off the network, block incoming UDP `50701` in your firewall ([Security policy](../SECURITY.md)).
 
 ## Uninstall
 

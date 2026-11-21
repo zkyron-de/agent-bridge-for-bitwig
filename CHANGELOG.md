@@ -16,6 +16,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - The bridge secret and the request log moved out of the install folder into the user's data folder: `~/Library/Application Support/agent-bridge-for-bitwig/` on macOS, `%APPDATA%\agent-bridge-for-bitwig\` on Windows, `~/.config/agent-bridge-for-bitwig/` on Linux. Setup moves an existing `data/bridge-token` there, so an installed controller keeps working; until then the server still reads the old file.
 - In a package install, setup skips `npm install`.
 
+### Fixed
+
+- The docs said the controller listens only on `127.0.0.1`. Bitwig opens UDP port 50701 on all network interfaces, because the Controller API takes no address. Requests without the secret are still dropped unanswered and replies still go only to `127.0.0.1`; README, setup, development docs and the security policy now say so and suggest a firewall rule.
+
 ## [2.1.0] - 2026-11-20
 
 ### Added

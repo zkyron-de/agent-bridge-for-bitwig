@@ -34,7 +34,7 @@ Agent Bridge for Bitwig is a local [MCP](https://modelcontextprotocol.io) server
 - **Exact targets.** Tracks are addressed by Bitwig's track id, which survives renaming and moving. Devices, scenes and clips are addressed by index plus their exact current name, so a stale target is refused instead of changing the wrong thing.
 - **Read back.** A change is reported as done only once Bitwig shows it. Otherwise the reply says what Bitwig holds now.
 - **Strict inputs.** All 24 tools have strict JSON schemas; unknown fields are rejected.
-- **Local only.** Everything runs on your computer over loopback. Nothing is exposed to the network.
+- **Local only.** Agent, server and Bitwig talk on your computer. Requests need a per-install secret that never leaves it, and Bitwig answers only locally ([Security](SECURITY.md)).
 
 > Bitwig Studio is a product of Bitwig GmbH. This project is an independent community tool and is not affiliated with or endorsed by Bitwig.
 
